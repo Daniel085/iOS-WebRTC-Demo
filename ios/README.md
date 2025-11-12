@@ -6,7 +6,7 @@ This is the iOS application for the WebRTC Dialer project.
 
 ```
 WebRTCDialer/
-├── Podfile                          # CocoaPods dependencies
+├── WebRTCDialer.xcodeproj           # Xcode project
 ├── WebRTCDialer/
 │   ├── App/
 │   │   └── WebRTCDialerApp.swift   # App entry point
@@ -80,40 +80,41 @@ WebRTCDialer/
 
 ## Dependencies
 
-The project uses CocoaPods for dependency management:
+The project uses Swift Package Manager (built into Xcode):
 
-- **GoogleWebRTC** (~15 MB) - WebRTC library for voice/video calling
+- **WebRTC** (~300 MB) - WebRTC library for voice/video calling
+  - Package: `https://github.com/stasel/WebRTC.git`
 - **Socket.IO-Client-Swift** (~2 MB) - WebSocket client for signaling
+  - Package: `https://github.com/socketio/socket.io-client-swift.git`
 - **PhoneNumberKit** (~1 MB) - Phone number parsing and validation
+  - Package: `https://github.com/marmelroy/PhoneNumberKit.git`
 
 ## Setup Instructions
 
 ### Prerequisites
 - macOS 12.0+
-- Xcode 14.0+
-- CocoaPods 1.12+
+- Xcode 14.0+ (Xcode 15+ recommended)
 - Apple Developer Account (for VoIP features)
+- **No additional tools required** - Swift Package Manager is built into Xcode
 
 ### Installation
 
-1. **Install CocoaPods** (if not already installed):
-   ```bash
-   sudo gem install cocoapods
-   ```
-
-2. **Install Dependencies**:
+1. **Open Project**:
    ```bash
    cd ios/WebRTCDialer
-   pod install
+   open WebRTCDialer.xcodeproj
    ```
 
-3. **Open Workspace**:
-   ```bash
-   open WebRTCDialer.xcworkspace
-   ```
-   **Important**: Always open the `.xcworkspace` file, NOT the `.xcodeproj`!
+2. **Add Swift Package Dependencies**:
+   - In Xcode: File → Add Package Dependencies
+   - Add these packages:
+     - WebRTC: `https://github.com/stasel/WebRTC.git` (v114.0.0+)
+     - Socket.IO: `https://github.com/socketio/socket.io-client-swift.git` (v16.0.0+)
+     - PhoneNumberKit: `https://github.com/marmelroy/PhoneNumberKit.git` (v3.7.0+)
+   - Wait for package resolution (2-3 minutes)
+   - See `../docs/SPM_DEPENDENCIES.md` for detailed instructions
 
-4. **Configure Signing**:
+3. **Configure Signing**:
    - Select the WebRTCDialer target
    - Go to Signing & Capabilities
    - Select your development team

@@ -58,24 +58,20 @@ A working iOS app with:
 
 If you have a Mac with Xcode:
 
-1. **Install CocoaPods**:
-   ```bash
-   sudo gem install cocoapods
-   ```
-
-2. **Install Dependencies**:
+1. **Open in Xcode**:
    ```bash
    cd ios/WebRTCDialer
-   pod install
+   open WebRTCDialer.xcodeproj
    ```
 
-3. **Open in Xcode**:
-   ```bash
-   open WebRTCDialer.xcworkspace
-   ```
-   **Important**: Always open `.xcworkspace`, not `.xcodeproj`!
+2. **Add Swift Package Dependencies**:
+   - In Xcode: File → Add Package Dependencies
+   - Add WebRTC: `https://github.com/stasel/WebRTC.git`
+   - Add Socket.IO: `https://github.com/socketio/socket.io-client-swift.git`
+   - Add PhoneNumberKit: `https://github.com/marmelroy/PhoneNumberKit.git`
+   - See `docs/SPM_DEPENDENCIES.md` for detailed instructions
 
-4. **Configure**:
+3. **Configure**:
    - Select your development team in Signing & Capabilities
    - Update `Constants.swift` with your server URLs
    - Build and run (⌘R)
@@ -190,9 +186,9 @@ To complete the app:
 
 ### For Development
 - [ ] Read `docs/SETUP_GUIDE.md`
-- [ ] Install Xcode and CocoaPods
-- [ ] Run `pod install` in `ios/WebRTCDialer`
-- [ ] Open `WebRTCDialer.xcworkspace`
+- [ ] Install Xcode 14+ (15+ recommended)
+- [ ] Open `WebRTCDialer.xcodeproj`
+- [ ] Add Swift Package dependencies (see `docs/SPM_DEPENDENCIES.md`)
 - [ ] Configure signing team
 - [ ] Update `Constants.swift` with your URLs
 - [ ] Build and run
