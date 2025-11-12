@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# PM2
+.pm2
+
+# Coverage
+coverage/
+.nyc_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# Build
+dist/
+build/
+
+# Certificates (keep template but not actual certs)
+certs/*.pem
+certs/*.p8
+certs/*.p12
+certs/*.cer
+certs/*.key
+!certs/.gitkeep
+
+# Database
+*.sqlite
+*.db
+
+# Misc
+.cache/
+temp/
+tmp/
