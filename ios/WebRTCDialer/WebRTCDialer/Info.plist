@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Privacy Permissions -->
+    <key>NSCameraUsageDescription</key>
+    <string>We need access to your camera for video calls.</string>
+
+    <key>NSMicrophoneUsageDescription</key>
+    <string>We need access to your microphone for voice and video calls.</string>
+
+    <key>NSContactsUsageDescription</key>
+    <string>We need access to your contacts so you can easily call your friends and family.</string>
+
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>We need access to your local network to establish peer-to-peer calls.</string>
+
+    <!-- Background Modes -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+        <string>voip</string>
+    </array>
+
+    <!-- App Transport Security -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+        <!-- Add your server domain here in production -->
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>localhost</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+            </dict>
+        </dict>
+    </dict>
+</dict>
+</plist>
