@@ -211,14 +211,18 @@ To test the app:
 
 **"No such module 'WebRTC'"**
 ```bash
-# Reinstall pods
-pod deintegrate
-pod install
+# In Xcode:
+# File → Packages → Reset Package Caches
+# File → Packages → Resolve Package Versions
+# Product → Clean Build Folder (Shift+⌘+K)
+# Rebuild (⌘B)
 ```
 
-**Pod install takes forever**
+**Package resolution takes forever**
 ```bash
-pod install --repo-update
+# Reset SPM caches
+rm -rf ~/Library/Caches/org.swift.swiftpm
+# Then in Xcode: File → Packages → Resolve Package Versions
 ```
 
 ### Runtime Issues

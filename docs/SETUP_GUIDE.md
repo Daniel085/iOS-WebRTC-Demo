@@ -368,14 +368,17 @@ Follow [IMPLEMENTATION_ROADMAP.md](./IMPLEMENTATION_ROADMAP.md) - Phase 1, Week 
 ### Debug Tools
 
 ```bash
-# View CocoaPods installation
-pod list
+# Check Xcode version
+xcodebuild -version
 
-# Check pod versions
-pod outdated
+# List installed packages
+# In Xcode: File → Packages → Package Dependencies
 
-# Update specific pod
-pod update GoogleWebRTC
+# Update packages
+# In Xcode: File → Packages → Update to Latest Package Versions
+
+# Reset package caches
+rm -rf ~/Library/Caches/org.swift.swiftpm
 ```
 
 ### Testing on Device
@@ -396,29 +399,20 @@ To test without paid account:
 - [WebRTC iOS Documentation](https://webrtc.github.io/webrtc-org/native-code/ios/)
 - [CallKit Documentation](https://developer.apple.com/documentation/callkit)
 - [PushKit Documentation](https://developer.apple.com/documentation/pushkit)
-- [CocoaPods Guides](https://guides.cocoapods.org/)
+- [Swift Package Manager Documentation](https://developer.apple.com/documentation/swift_packages)
 
 ## Troubleshooting Commands
 
 ```bash
-# Check Ruby version (for CocoaPods)
-ruby --version
+# Check Xcode and tools
+xcodebuild -version
+swift --version
 
-# Check CocoaPods version
-pod --version
-
-# Update CocoaPods
-sudo gem install cocoapods
-
-# Clear CocoaPods cache
-pod cache clean --all
-
-# Reinstall all pods
-rm -rf Pods/ Podfile.lock
-pod install
-
-# Reset Xcode derived data
+# Clean derived data
 rm -rf ~/Library/Developer/Xcode/DerivedData
+
+# Reset Swift Package Manager caches
+rm -rf ~/Library/Caches/org.swift.swiftpm
 ```
 
 ## Ready to Build!

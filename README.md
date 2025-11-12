@@ -447,8 +447,8 @@ config.iceServers = [
   - 10-week implementation roadmap
 
 - **Dependencies Configuration**
-  - Podfile for CocoaPods
-  - WebRTC, Socket.IO, PhoneNumberKit
+  - Swift Package Manager (built into Xcode)
+  - WebRTC, Socket.IO, PhoneNumberKit packages
 
 ### ⚠️ Required But Not Included
 
@@ -495,12 +495,13 @@ To get started with **minimal setup** (no costs):
 git clone <repo-url>
 cd iOS-WebRTC-Demo
 
-# 2. Install iOS dependencies
+# 2. Open in Xcode
 cd ios/WebRTCDialer
-pod install
+open WebRTCDialer.xcodeproj
 
-# 3. Open in Xcode
-open WebRTCDialer.xcworkspace
+# 3. Add Swift Package Dependencies
+# In Xcode: File → Add Package Dependencies
+# Add the three packages (see docs/SPM_DEPENDENCIES.md)
 
 # 4. Run in simulator
 # Select iPhone 14 Pro simulator, press ▶️
