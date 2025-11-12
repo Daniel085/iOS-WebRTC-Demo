@@ -15,7 +15,15 @@ A native iOS application that provides a seamless phone dialing experience using
 
 ## Documentation
 
-Comprehensive documentation is available in the `/docs` folder:
+### 📖 Start Here
+
+- **[HOW_IT_WORKS.md](./docs/HOW_IT_WORKS.md)** - 🌟 **Complete walkthrough** of how the entire app works from start to finish
+- **[GETTING_STARTED.md](./GETTING_STARTED.md)** - Quick start guide for developers
+- **[SETUP_GUIDE.md](./docs/SETUP_GUIDE.md)** - Detailed setup instructions with dependencies
+
+### 📚 Technical Documentation
+
+Comprehensive technical guides available in the `/docs` folder:
 
 - **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - Overall system architecture and design
 - **[WEBRTC_INTEGRATION.md](./docs/WEBRTC_INTEGRATION.md)** - WebRTC implementation guide
