@@ -10,15 +10,19 @@ WebRTC (Web Real-Time Communication) enables peer-to-peer audio and video commun
 
 The official Google WebRTC library is the recommended choice:
 
-**Installation via CocoaPods:**
+**Installation via Swift Package Manager (Recommended):**
+```
+https://github.com/stasel/WebRTC.git
+```
+
+This is a well-maintained SPM wrapper around the official GoogleWebRTC binaries. Use version `114.0.0` or later.
+
+**Alternative: CocoaPods (Legacy):**
 ```ruby
 pod 'GoogleWebRTC', '~> 1.1'
 ```
 
-**Installation via Swift Package Manager:**
-```
-https://github.com/webrtc-sdk/Specs
-```
+Note: This project uses Swift Package Manager for cleaner dependency management.
 
 **Why Google WebRTC:**
 - Official implementation

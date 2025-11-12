@@ -199,7 +199,7 @@ A native iOS application that provides a seamless phone dialing experience using
 ### iOS Application
 - **Language**: Swift 5.9+
 - **Minimum iOS Version**: iOS 15.0+
-- **WebRTC**: GoogleWebRTC (via CocoaPods or SPM)
+- **WebRTC**: GoogleWebRTC (via Swift Package Manager)
 - **UI Framework**: UIKit or SwiftUI
 - **Frameworks**:
   - CallKit

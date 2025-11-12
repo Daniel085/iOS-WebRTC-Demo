@@ -167,7 +167,7 @@ Essential for matching incoming calls with contacts:
 import PhoneNumberKit
 
 // Using PhoneNumberKit library (recommended)
-// Add to Podfile: pod 'PhoneNumberKit'
+// Add via SPM: https://github.com/marmelroy/PhoneNumberKit.git
 
 class PhoneNumberFormatter {
     static let shared = PhoneNumberFormatter()

@@ -65,24 +65,17 @@ Tasks:
 **Day 3-4: Dependencies**
 ```
 Tasks:
-□ Set up CocoaPods or SPM
-□ Add dependencies:
-  - GoogleWebRTC
-  - SocketIO-Client-Swift
-  - PhoneNumberKit (optional but recommended)
+□ Add Swift Package Manager dependencies in Xcode
+□ Add packages via File → Add Package Dependencies:
+  - WebRTC: https://github.com/stasel/WebRTC.git (v114.0.0+)
+  - Socket.IO: https://github.com/socketio/socket.io-client-swift.git (v16.0.0+)
+  - PhoneNumberKit: https://github.com/marmelroy/PhoneNumberKit.git (v3.7.0+)
 
-□ Create Podfile:
-  platform :ios, '15.0'
-  use_frameworks!
-
-  target 'WebRTCDialer' do
-    pod 'GoogleWebRTC'
-    pod 'Socket.IO-Client-Swift'
-    pod 'PhoneNumberKit'
-  end
-
-□ Run pod install
+□ Wait for package resolution (2-3 minutes)
 □ Verify all dependencies compile
+□ Check Package Dependencies in Project Navigator
+
+Note: See docs/SPM_DEPENDENCIES.md for detailed instructions
 ```
 
 **Day 5: Basic UI Structure**
