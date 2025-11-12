@@ -5,8 +5,8 @@ This guide walks you through creating and running the iOS WebRTC Dialer app in X
 ## Prerequisites
 
 - macOS 12.0 or later
-- Xcode 14.0 or later
-- CocoaPods installed (`sudo gem install cocoapods`)
+- Xcode 14.0 or later (Xcode 15+ recommended)
+- **No additional tools required** - we use Swift Package Manager (built into Xcode)
 
 ## Step-by-Step Setup
 
@@ -94,82 +94,48 @@ Xcode created some default files. We need to replace them with our code:
    - Name it `Assets`
    - Click **Create**
 
-### Step 3: Copy Podfile
+### Step 3: Add Swift Package Dependencies
 
-1. **Copy Podfile to Project Root**
-   ```bash
-   # In Terminal
-   cd ~/iOS-WebRTC-Demo/ios/WebRTCDialer
+We use Swift Package Manager (SPM) for dependencies - it's built into Xcode!
 
-   # Podfile should already be here from our setup
-   # If not, copy it from the repo
-   ```
+1. **Keep Xcode Open** with your project
 
-2. **Verify Podfile Contents**
-   ```ruby
-   platform :ios, '15.0'
-   use_frameworks!
+2. **Add WebRTC Package**
+   - File → Add Package Dependencies... (or in Project Navigator: File → Add Package Dependencies)
+   - In the search box, paste: `https://github.com/stasel/WebRTC.git`
+   - Dependency Rule: **Up to Next Major Version** → `114.0.0`
+   - Click **Add Package**
+   - Select **WebRTC** framework
+   - Click **Add Package** again
 
-   target 'WebRTCDialer' do
-     pod 'GoogleWebRTC', '~> 1.1.31999'
-     pod 'Socket.IO-Client-Swift', '~> 16.0.1'
-     pod 'PhoneNumberKit', '~> 3.7.4'
-   end
+3. **Add Socket.IO Package**
+   - File → Add Package Dependencies...
+   - Paste: `https://github.com/socketio/socket.io-client-swift.git`
+   - Dependency Rule: **Up to Next Major Version** → `16.0.0`
+   - Click **Add Package**
+   - Select **SocketIO** product
+   - Click **Add Package**
 
-   post_install do |installer|
-     installer.pods_project.targets.each do |target|
-       target.build_configurations.each do |config|
-         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
-         config.build_settings['ENABLE_BITCODE'] = 'NO'
-       end
-     end
-   end
-   ```
+4. **Add PhoneNumberKit Package**
+   - File → Add Package Dependencies...
+   - Paste: `https://github.com/marmelroy/PhoneNumberKit.git`
+   - Dependency Rule: **Up to Next Major Version** → `3.7.0`
+   - Click **Add Package**
+   - Select **PhoneNumberKit** product
+   - Click **Add Package**
 
-### Step 4: Install CocoaPods Dependencies
+5. **Wait for Package Resolution**
+   - Xcode will download and resolve dependencies
+   - This may take 2-3 minutes (WebRTC is ~300MB)
+   - Progress shown in top-right of Xcode window
 
-1. **Close Xcode** (Important!)
-   - Xcode → Quit Xcode (⌘Q)
+6. **Verify Packages Added**
+   - In Project Navigator, look for "Package Dependencies" section
+   - You should see: WebRTC, socket.io-client-swift, PhoneNumberKit
 
-2. **Install Pods**
-   ```bash
-   cd ~/iOS-WebRTC-Demo/ios/WebRTCDialer
-   pod install
-   ```
+**Note:** For detailed SPM instructions, see `docs/SPM_DEPENDENCIES.md`
 
-   You should see:
-   ```
-   Analyzing dependencies
-   Downloading dependencies
-   Installing GoogleWebRTC (1.1.31999)
-   Installing PhoneNumberKit (3.7.4)
-   Installing Socket.IO-Client-Swift (16.0.1)
-   Generating Pods project
-   Integrating client project
-
-   [!] Please close any current Xcode sessions and use
-   `WebRTCDialer.xcworkspace` for this project from now on.
-
-   Pod installation complete! There are 3 dependencies from the Podfile.
-   ```
-
-   **This creates:**
-   - `Pods/` folder with dependencies
-   - `WebRTCDialer.xcworkspace` ← **Open this from now on!**
-   - `Podfile.lock`
-
-### Step 5: Open Workspace
-
-**CRITICAL**: Always open the `.xcworkspace`, NOT the `.xcodeproj`!
-
-```bash
-cd ~/iOS-WebRTC-Demo/ios/WebRTCDialer
-open WebRTCDialer.xcworkspace
-```
-
-Or double-click `WebRTCDialer.xcworkspace` in Finder.
-
-### Step 6: Configure Project Settings
+### Step 4: Configure Project Settings
 
 1. **Select Project**
    - Click on `WebRTCDialer` (blue icon) in Project Navigator
@@ -211,7 +177,7 @@ Or double-click `WebRTCDialer.xcworkspace` in Finder.
    - Search for: "Bitcode"
    - Set **Enable Bitcode** to **No**
 
-### Step 7: Configure Info.plist
+### Step 5: Configure Info.plist
 
 1. **Open Info.plist**
    - Click on `Info.plist` in Project Navigator
@@ -239,7 +205,7 @@ Or double-click `WebRTCDialer.xcworkspace` in Finder.
    - Item 0: `audio` (String)
    - Item 1: `voip` (String)
 
-### Step 8: Update Constants
+### Step 6: Update Constants
 
 1. **Open `Utilities/Constants.swift`**
 
@@ -263,7 +229,7 @@ Or double-click `WebRTCDialer.xcworkspace` in Finder.
    }
    ```
 
-### Step 9: Build the Project
+### Step 7: Build the Project
 
 1. **Select Simulator**
    - At the top of Xcode window
@@ -279,17 +245,17 @@ Or double-click `WebRTCDialer.xcworkspace` in Finder.
    - First build may take 2-5 minutes
    - Subsequent builds will be faster
 
-### Step 10: Fix Common Build Errors
+### Step 8: Fix Common Build Errors
 
 If you encounter errors:
 
 **Error: "No such module 'WebRTC'"**
 ```
 Solution:
-1. Make sure you opened .xcworkspace (not .xcodeproj)
+1. File → Packages → Reset Package Caches
 2. Clean build folder: Product → Clean Build Folder (Shift+⌘+K)
-3. Quit Xcode and run: pod deintegrate && pod install
-4. Reopen .xcworkspace
+3. File → Packages → Resolve Package Versions
+4. Rebuild project (Cmd+B)
 ```
 
 **Error: "Command PhaseScriptExecution failed"**
@@ -307,13 +273,13 @@ Solution:
 3. Right-click → Show in Project Navigator to verify
 ```
 
-**Error: Framework not found**
+**Error: Package resolution failed**
 ```
 Solution:
-1. cd ios/WebRTCDialer
-2. pod install
-3. Clean build folder in Xcode
-4. Rebuild
+1. Delete ~/Library/Caches/org.swift.swiftpm
+2. In Xcode: File → Packages → Reset Package Caches
+3. File → Packages → Update to Latest Package Versions
+4. Clean and rebuild
 ```
 
 ## Running in Simulator
@@ -538,17 +504,15 @@ Phase 4: Two Physical Devices
 # 1. Navigate to project
 cd ~/iOS-WebRTC-Demo/ios/WebRTCDialer
 
-# 2. Install dependencies
-pod install
+# 2. Open project (NOT workspace - we use SPM, not CocoaPods)
+open WebRTCDialer.xcodeproj
 
-# 3. Open workspace
-open WebRTCDialer.xcworkspace
-
-# 4. In Xcode:
+# 3. In Xcode:
+#    - File → Add Package Dependencies (add WebRTC, Socket.IO, PhoneNumberKit)
 #    - Select simulator (iPhone 14 Pro)
 #    - Press ⌘R to run
 
-# 5. If you want a mock backend:
+# 4. If you want a mock backend:
 cd ../../backend
 npm init -y && npm install express
 # Create mock-server.js (see above)
@@ -559,8 +523,8 @@ node mock-server.js
 
 Before asking for help, verify:
 
-- [ ] Opened `.xcworkspace` (NOT `.xcodeproj`)
-- [ ] Ran `pod install` successfully
+- [ ] Opened `.xcodeproj` file (we use SPM, no workspace needed)
+- [ ] All three Swift packages added (WebRTC, Socket.IO, PhoneNumberKit)
 - [ ] All source files added to project
 - [ ] Build target is iOS 15.0+
 - [ ] Simulator is iOS 15.0+
@@ -568,6 +532,7 @@ Before asking for help, verify:
 - [ ] Info.plist has privacy descriptions
 - [ ] Constants.swift has valid URLs
 - [ ] Clean build folder tried (Shift+⌘+K)
+- [ ] Package caches reset if needed (File → Packages → Reset Package Caches)
 
 ## Success!
 

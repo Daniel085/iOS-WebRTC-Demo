@@ -57,9 +57,9 @@ Comprehensive technical guides available in the `/docs` folder:
 ### Prerequisites
 
 **For iOS Development:**
-- macOS 12.0+ with Xcode 14+
-- CocoaPods: `sudo gem install cocoapods`
+- macOS 12.0+ with Xcode 14+ (Xcode 15+ recommended)
 - Apple Developer Account ($99/year for VoIP features)
+- **No additional tools required** - we use Swift Package Manager
 
 **For Backend Development (Optional):**
 - Node.js 18+
@@ -77,13 +77,17 @@ Perfect for testing UI and development without backend:
 git clone <your-repo-url>
 cd iOS-WebRTC-Demo/ios/WebRTCDialer
 
-# 2. Install dependencies (takes 2-5 minutes first time)
-pod install
+# 2. Open in Xcode
+open WebRTCDialer.xcodeproj
 
-# 3. Open in Xcode
-open WebRTCDialer.xcworkspace
+# 3. Add Swift Package Dependencies in Xcode:
+#    - File → Add Package Dependencies
+#    - Add: https://github.com/stasel/WebRTC.git
+#    - Add: https://github.com/socketio/socket.io-client-swift.git
+#    - Add: https://github.com/marmelroy/PhoneNumberKit.git
+#    See docs/SPM_DEPENDENCIES.md for detailed instructions
 
-# 4. In Xcode:
+# 4. Select simulator and run:
 #    - Select iPhone simulator (iPhone 14 Pro or later)
 #    - Press ▶️ Run button (or ⌘R)
 ```
@@ -162,9 +166,9 @@ enum API {
 ```bash
 # Minimum to see the app run:
 cd iOS-WebRTC-Demo/ios/WebRTCDialer
-pod install
-open WebRTCDialer.xcworkspace
-# Press ▶️ in Xcode
+open WebRTCDialer.xcodeproj
+# In Xcode: Add Swift packages (see docs/SPM_DEPENDENCIES.md)
+# Then press ▶️ in Xcode
 
 # To test with mock authentication:
 cd ../../backend

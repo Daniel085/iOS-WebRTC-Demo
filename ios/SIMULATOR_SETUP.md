@@ -4,8 +4,8 @@
 
 ## Prerequisites
 
-1. macOS with Xcode 14+ installed
-2. CocoaPods installed: `sudo gem install cocoapods`
+1. macOS with Xcode 14+ installed (Xcode 15+ recommended)
+2. **No additional tools required** - we use Swift Package Manager
 
 ## Setup (First Time Only)
 
@@ -38,26 +38,32 @@ In Xcode:
 
 3. Replace `Info.plist` with our version
 
-### 3. Install Dependencies
+### 3. Add Swift Package Dependencies
 
-Close Xcode, then in Terminal:
+Keep Xcode open, then add packages:
 
-```bash
-cd iOS-WebRTC-Demo/ios/WebRTCDialer
-pod install
-```
+1. **File → Add Package Dependencies...**
 
-**Important**: Takes 2-5 minutes to download WebRTC
+2. **Add WebRTC**:
+   - URL: `https://github.com/stasel/WebRTC.git`
+   - Dependency: Up to Next Major → `114.0.0`
+   - Click Add Package
 
-### 4. Open Workspace
+3. **Add Socket.IO**:
+   - URL: `https://github.com/socketio/socket.io-client-swift.git`
+   - Dependency: Up to Next Major → `16.0.0`
+   - Click Add Package
 
-```bash
-open WebRTCDialer.xcworkspace
-```
+4. **Add PhoneNumberKit**:
+   - URL: `https://github.com/marmelroy/PhoneNumberKit.git`
+   - Dependency: Up to Next Major → `3.7.0`
+   - Click Add Package
 
-⚠️ **Always open `.xcworkspace`, NEVER `.xcodeproj`**
+**Takes 2-3 minutes to download WebRTC (~300MB)**
 
-### 5. Configure Capabilities
+See `docs/SPM_DEPENDENCIES.md` for detailed package instructions
+
+### 4. Configure Capabilities
 
 In Xcode:
 1. Select project → Target → Signing & Capabilities
@@ -65,7 +71,7 @@ In Xcode:
    - Check: Audio, AirPlay, Picture in Picture
    - Check: Voice over IP
 
-### 6. Update URLs
+### 5. Update URLs
 
 Edit `Utilities/Constants.swift`:
 
@@ -76,7 +82,7 @@ enum API {
 }
 ```
 
-### 7. Run!
+### 6. Run!
 
 1. Select simulator: iPhone 14 Pro
 2. Press ▶️ (or ⌘R)
@@ -88,7 +94,7 @@ Every time after initial setup:
 
 ```bash
 cd iOS-WebRTC-Demo/ios/WebRTCDialer
-open WebRTCDialer.xcworkspace
+open WebRTCDialer.xcodeproj
 ```
 
 Then press ▶️ in Xcode
@@ -168,10 +174,11 @@ node mock.js
 
 **"No such module 'WebRTC'"**
 ```bash
-# Make sure you opened .xcworkspace
-cd iOS-WebRTC-Demo/ios/WebRTCDialer
-pod install
-open WebRTCDialer.xcworkspace
+# Reset package caches in Xcode:
+# File → Packages → Reset Package Caches
+# File → Packages → Resolve Package Versions
+# Clean Build Folder (Shift+⌘+K)
+# Rebuild (⌘B)
 ```
 
 **Build takes forever**
