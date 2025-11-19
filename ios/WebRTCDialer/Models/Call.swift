@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 
 /// Represents a call session
 class Call: Identifiable, ObservableObject {

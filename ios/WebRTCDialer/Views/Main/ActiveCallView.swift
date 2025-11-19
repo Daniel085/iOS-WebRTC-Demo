@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 struct ActiveCallView: View {
     @StateObject private var viewModel: ActiveCallViewModel
@@ -357,7 +358,9 @@ class ActiveCallViewModel: ObservableObject {
 
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.callDuration += 1
+            Task { @MainActor in
+                self?.callDuration += 1
+            }
         }
     }
 
