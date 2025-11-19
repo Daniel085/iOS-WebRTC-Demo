@@ -10,8 +10,8 @@ import Foundation
 enum Constants {
     /// API Configuration
     enum API {
-        static let baseURL = "https://your-api.com" // Replace with your server URL
-        static let signalingURL = "wss://your-api.com" // Replace with your WebSocket URL
+        static let baseURL = "http://localhost:3000" // Local development server
+        static let signalingURL = "ws://localhost:3001" // Local WebSocket server
     }
 
     /// STUN/TURN Servers

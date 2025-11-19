@@ -3,7 +3,7 @@
  * Sends VoIP push notifications to iOS devices
  */
 
-const apn = require('apn');
+const apn = require('@parse/node-apn');
 const logger = require('../utils/logger');
 
 let apnProvider = null;

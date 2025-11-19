@@ -12,13 +12,14 @@ struct AuthenticationView: View {
     @EnvironmentObject var appState: AppState
     @State private var phoneNumber = ""
     @State private var isVerifying = false
+    @State private var devCode: String?
 
     var body: some View {
         NavigationView {
             if isVerifying {
-                VerificationCodeView(phoneNumber: phoneNumber, isVerifying: $isVerifying)
+                VerificationCodeView(phoneNumber: phoneNumber, devCode: devCode, isVerifying: $isVerifying)
             } else {
-                PhoneNumberEntryView(phoneNumber: $phoneNumber, isVerifying: $isVerifying)
+                PhoneNumberEntryView(phoneNumber: $phoneNumber, isVerifying: $isVerifying, devCode: $devCode)
             }
         }
     }

@@ -40,14 +40,21 @@ router.post('/send-code', async (req, res, next) => {
     const { phoneNumber } = value;
 
     // Send verification code via SMS
-    await sendVerificationCode(phoneNumber);
+    const result = await sendVerificationCode(phoneNumber);
 
     logger.info(`Verification code sent to ${phoneNumber}`);
 
-    res.json({
+    const response = {
       success: true,
       message: 'Verification code sent successfully'
-    });
+    };
+
+    // In development mode, include the code in the response
+    if (process.env.NODE_ENV === 'development' && result.code) {
+      response.devCode = result.code;
+    }
+
+    res.json(response);
 
   } catch (error) {
     logger.error('Error sending verification code:', error);

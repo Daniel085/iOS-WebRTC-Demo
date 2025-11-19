@@ -10,6 +10,7 @@ import Combine
 
 struct VerificationCodeView: View {
     let phoneNumber: String
+    let devCode: String?
     @Binding var isVerifying: Bool
     @EnvironmentObject var appState: AppState
     @StateObject private var viewModel = VerificationCodeViewModel()
@@ -45,6 +46,22 @@ struct VerificationCodeView: View {
                     .font(.title)
                     .multilineTextAlignment(.center)
                     .disabled(viewModel.isLoading)
+
+                if let devCode = devCode {
+                    VStack(spacing: 8) {
+                        Text("Development Mode")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                        Text("Code: \(devCode)")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(Color.orange.opacity(0.1))
+                            .cornerRadius(8)
+                    }
+                }
 
                 if let errorMessage = viewModel.errorMessage {
                     Text(errorMessage)
@@ -115,6 +132,6 @@ class VerificationCodeViewModel: ObservableObject {
 }
 
 #Preview {
-    VerificationCodeView(phoneNumber: "+1234567890", isVerifying: .constant(true))
+    VerificationCodeView(phoneNumber: "+1234567890", devCode: "123456", isVerifying: .constant(true))
         .environmentObject(AppState())
 }

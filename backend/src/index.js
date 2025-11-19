@@ -13,16 +13,25 @@ const startSignalingServer = require('./signaling-server');
 // Import database
 const db = require('./database/models');
 
+// TODO: Re-enable PostgreSQL database when ready
+// For now, running in-memory mode for quick testing
+const SKIP_DATABASE = process.env.SKIP_DATABASE === 'true';
+
 async function startServers() {
   try {
     // Test database connection
-    await db.sequelize.authenticate();
-    logger.info('✓ Database connection established successfully');
+    if (!SKIP_DATABASE) {
+      await db.sequelize.authenticate();
+      logger.info('✓ Database connection established successfully');
 
-    // Sync database models (use migrations in production)
-    if (process.env.NODE_ENV !== 'production') {
-      await db.sequelize.sync({ alter: false });
-      logger.info('✓ Database models synchronized');
+      // Sync database models (use migrations in production)
+      if (process.env.NODE_ENV !== 'production') {
+        await db.sequelize.sync({ alter: false });
+        logger.info('✓ Database models synchronized');
+      }
+    } else {
+      logger.warn('⚠️  Running WITHOUT database (SKIP_DATABASE=true)');
+      logger.warn('⚠️  User data will NOT persist. For production, set up PostgreSQL.');
     }
 
     // Start API Server
@@ -50,8 +59,10 @@ async function startServers() {
         logger.info('✓ Signaling Server closed');
       });
 
-      await db.sequelize.close();
-      logger.info('✓ Database connection closed');
+      if (!SKIP_DATABASE) {
+        await db.sequelize.close();
+        logger.info('✓ Database connection closed');
+      }
 
       process.exit(0);
     };

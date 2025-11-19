@@ -11,6 +11,7 @@ import Combine
 struct PhoneNumberEntryView: View {
     @Binding var phoneNumber: String
     @Binding var isVerifying: Bool
+    @Binding var devCode: String?
     @StateObject private var viewModel = PhoneNumberEntryViewModel()
 
     var body: some View {
@@ -44,6 +45,10 @@ struct PhoneNumberEntryView: View {
                     .multilineTextAlignment(.center)
                     .disabled(viewModel.isLoading)
 
+                Text("Example: +11234567890")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+
                 if let errorMessage = viewModel.errorMessage {
                     Text(errorMessage)
                         .foregroundColor(.red)
@@ -54,6 +59,7 @@ struct PhoneNumberEntryView: View {
                     Task {
                         await viewModel.sendVerificationCode(phoneNumber: phoneNumber)
                         if viewModel.codeSent {
+                            devCode = viewModel.devCode
                             isVerifying = true
                         }
                     }
@@ -92,14 +98,16 @@ class PhoneNumberEntryViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var codeSent = false
+    @Published var devCode: String?
 
     func sendVerificationCode(phoneNumber: String) async {
         isLoading = true
         errorMessage = nil
         codeSent = false
+        devCode = nil
 
         do {
-            try await AuthenticationService.shared.sendVerificationCode(phoneNumber: phoneNumber)
+            devCode = try await AuthenticationService.shared.sendVerificationCode(phoneNumber: phoneNumber)
             codeSent = true
         } catch {
             errorMessage = error.localizedDescription
@@ -110,5 +118,5 @@ class PhoneNumberEntryViewModel: ObservableObject {
 }
 
 #Preview {
-    PhoneNumberEntryView(phoneNumber: .constant(""), isVerifying: .constant(false))
+    PhoneNumberEntryView(phoneNumber: .constant(""), isVerifying: .constant(false), devCode: .constant(nil))
 }

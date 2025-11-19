@@ -53,8 +53,7 @@
     "twilio": "^4.19.3",
     "axios": "^1.6.5",
     "uuid": "^9.0.1",
-    "apn": "^2.2.0",
-    "node-apn": "^2.2.0",
+    "@parse/node-apn": "^6.5.0",
     "compression": "^1.7.4"
   },
   "devDependencies": {

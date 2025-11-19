@@ -21,8 +21,8 @@ class AuthenticationService {
     }
 
     /// Send verification code to phone number
-    func sendVerificationCode(phoneNumber: String) async throws {
-        guard let url = URL(string: "\(Constants.API.baseURL)/auth/send-code") else {
+    func sendVerificationCode(phoneNumber: String) async throws -> String? {
+        guard let url = URL(string: "\(Constants.API.baseURL)/api/auth/send-code") else {
             throw AuthError.invalidURL
         }
 
@@ -45,11 +45,22 @@ class AuthenticationService {
             }
             throw AuthError.invalidResponse
         }
+
+        // In development mode, return the code if provided
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            print("DEBUG: Response JSON: \(json)")
+            if let devCode = json["devCode"] as? String {
+                print("DEBUG: Dev code received: \(devCode)")
+                return devCode
+            }
+        }
+
+        return nil
     }
 
     /// Verify code and authenticate user
     func verifyCode(phoneNumber: String, code: String) async throws -> User {
-        guard let url = URL(string: "\(Constants.API.baseURL)/auth/verify-code") else {
+        guard let url = URL(string: "\(Constants.API.baseURL)/api/auth/verify-code") else {
             throw AuthError.invalidURL
         }
 
@@ -90,7 +101,7 @@ class AuthenticationService {
             throw AuthError.notAuthenticated
         }
 
-        guard let url = URL(string: "\(Constants.API.baseURL)/auth/refresh") else {
+        guard let url = URL(string: "\(Constants.API.baseURL)/api/auth/refresh") else {
             throw AuthError.invalidURL
         }
 

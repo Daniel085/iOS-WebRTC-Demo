@@ -34,11 +34,9 @@ cp .env.example .env
 Edit `.env` with your configuration:
 
 ```bash
-# Database
-DB_HOST=localhost
-DB_NAME=webrtc_dialer
-DB_USER=postgres
-DB_PASSWORD=your_password
+# Quick Start Mode (No Database Required)
+# TODO: For production, set SKIP_DATABASE=false and configure PostgreSQL
+SKIP_DATABASE=true
 
 # JWT Secrets (generate with: openssl rand -base64 32)
 JWT_SECRET=your-secret-here
@@ -53,10 +51,15 @@ SMS_PROVIDER=mock
 # TWILIO_VERIFY_SERVICE_SID=VAxxxxxx
 ```
 
-### 3. Setup Database
+**Note:** With `SKIP_DATABASE=true`, user data will NOT persist between restarts. This is for quick testing only.
+
+### 3. Setup Database (Optional - Skip for Quick Start)
+
+If you want persistent data, install PostgreSQL and run:
 
 ```bash
-# Create database
+# Set SKIP_DATABASE=false in .env first
+# Then create database
 npm run db:create
 
 # Run migrations
