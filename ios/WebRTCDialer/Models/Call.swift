@@ -13,26 +13,62 @@ import Combine
 class Call: Identifiable, ObservableObject {
     let id: UUID
     let phoneNumber: String
-    let isVideo: Bool
-    let isOutgoing: Bool
+
+    /// Whether this is a video call
+    var hasVideo: Bool
+
+    /// Whether this is an incoming call (vs outgoing)
+    let isIncoming: Bool
+
+    /// Convenience computed property
+    var isOutgoing: Bool { !isIncoming }
+
+    /// Current call state
     @Published var state: CallState = .idle
+
+    /// Whether audio is muted
     @Published var isMuted: Bool = false
+
+    /// Whether speaker is enabled
     @Published var isSpeakerOn: Bool = true
+
+    /// Whether call is on hold
+    @Published var isOnHold: Bool = false
+
+    /// Whether video is currently enabled
     @Published var isVideoEnabled: Bool
+
+    /// When the call connected
     var connectedAt: Date?
+
+    /// When the call ended
     var endedAt: Date?
+
+    /// Call duration
     var duration: TimeInterval {
         guard let connectedAt = connectedAt else { return 0 }
         let endTime = endedAt ?? Date()
         return endTime.timeIntervalSince(connectedAt)
     }
 
-    init(id: UUID = UUID(), phoneNumber: String, isVideo: Bool, isOutgoing: Bool = true) {
+    init(
+        id: UUID = UUID(),
+        phoneNumber: String,
+        isIncoming: Bool = false,
+        hasVideo: Bool = false,
+        state: CallState = .idle
+    ) {
         self.id = id
         self.phoneNumber = phoneNumber
-        self.isVideo = isVideo
-        self.isVideoEnabled = isVideo
-        self.isOutgoing = isOutgoing
+        self.isIncoming = isIncoming
+        self.hasVideo = hasVideo
+        self.isVideoEnabled = hasVideo
+        self.state = state
+    }
+
+    /// Convenience initializer for backward compatibility
+    convenience init(id: UUID = UUID(), phoneNumber: String, isVideo: Bool, isOutgoing: Bool = true) {
+        self.init(id: id, phoneNumber: phoneNumber, isIncoming: !isOutgoing, hasVideo: isVideo)
     }
 
     /// Start the call

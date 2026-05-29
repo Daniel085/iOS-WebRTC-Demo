@@ -313,16 +313,17 @@ struct ScaleButtonStyle: ButtonStyle {
 
 @MainActor
 class ActiveCallViewModel: ObservableObject {
-    @Published var isMuted = false
-    @Published var isSpeakerOn = true
-    @Published var isVideoEnabled: Bool
     @Published var showKeypad = false
     @Published var dtmfDigits = ""
     @Published var callDuration: TimeInterval = 0
 
     private let call: Call
-    private let callManager = CallManager.shared
+    private let callCoordinator = CallCoordinator.shared
     private var timer: Timer?
+
+    var isMuted: Bool { call.isMuted }
+    var isSpeakerOn: Bool { call.isSpeakerOn }
+    var isVideoEnabled: Bool { call.isVideoEnabled }
 
     var displayName: String {
         call.phoneNumber
@@ -344,7 +345,6 @@ class ActiveCallViewModel: ObservableObject {
 
     init(call: Call) {
         self.call = call
-        self.isVideoEnabled = call.isVideo
 
         // Start call timer when connected
         if call.state == .connected {
@@ -365,21 +365,15 @@ class ActiveCallViewModel: ObservableObject {
     }
 
     func toggleMute() {
-        isMuted.toggle()
-        call.isMuted = isMuted
-        // TODO: Implement actual mute functionality
+        callCoordinator.toggleMute()
     }
 
     func toggleSpeaker() {
-        isSpeakerOn.toggle()
-        call.isSpeakerOn = isSpeakerOn
-        // TODO: Implement actual speaker toggle
+        callCoordinator.toggleSpeaker()
     }
 
     func toggleVideo() {
-        isVideoEnabled.toggle()
-        call.isVideoEnabled = isVideoEnabled
-        // TODO: Implement actual video toggle
+        callCoordinator.toggleVideo()
     }
 
     func toggleKeypad() {
@@ -406,7 +400,7 @@ class ActiveCallViewModel: ObservableObject {
 
     func endCall() {
         timer?.invalidate()
-        callManager.endActiveCall()
+        callCoordinator.endCall()
     }
 
     private func formatDuration(_ duration: TimeInterval) -> String {
