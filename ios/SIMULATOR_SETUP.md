@@ -183,10 +183,77 @@ node mock.js
 - Make sure you added all source files
 - Check that `App/WebRTCDialerApp.swift` is in the project
 
+## Testing App-to-App Calls on Two Simulators
+
+The app places real WebRTC calls (Socket.IO signaling + `RTCPeerConnection`).
+Two simulators on the same Mac can call each other against the local backend.
+
+### 1. Start the backend
+
+```bash
+cd backend
+cp .env.example .env   # first time only
+# Two simulators + the smoke test share one IP, so raise the auth limiter:
+echo "AUTH_RATE_LIMIT_MAX_REQUESTS=1000" >> .env
+node src/index.js      # REST + signaling on http://localhost:3000
+```
+
+### 2. Point both simulators at the backend and allow the microphone
+
+```bash
+B=com.D3DigitalProductions.WebRTCDialer
+for UDID in <udid-A> <udid-B>; do
+  xcrun simctl boot $UDID
+  xcrun simctl install $UDID <path-to>/WebRTCDialer.app
+  # Only needed if the backend is not on the default http://localhost:3000
+  xcrun simctl spawn $UDID defaults write $B serverBaseURL http://localhost:3000
+  xcrun simctl privacy $UDID grant microphone $B
+done
+```
+
+(Settings → Server in the app does the same thing interactively.)
+
+### 3. Sign in and call
+
+1. Sign in on each simulator with a *different, valid-looking* number, e.g.
+   `(201) 555-0101` and `(201) 555-0102`. The 6-digit code is shown on screen
+   (mock SMS provider) and also printed in the backend log.
+2. On simulator B open **Keypad**, dial `2015550101`, tap call.
+3. Simulator A shows the in-app incoming call screen; tap **Accept**.
+4. Both screens show the call timer. The app console logs the state machine:
+
+```
+📡 [Signaling] → call-initiate …   📡 [Signaling] ← incoming-call …
+🎧 [WebRTC] Local offer set        🎧 [WebRTC] Remote offer set
+🎧 [WebRTC] ICE connection state → connected
+📞 [CallManager] Call … connected (ICE connected)
+🎧 [WebRTC] Stats: audio sent 0 pkts/0 B, …, transport 834 B out/1023 B in | ice=connected pc=connected
+```
+
+Launch with `xcrun simctl launch --console-pty <udid> $B` to see those logs.
+
+### Simulator limitations (handled automatically)
+
+| Limitation | What the app does |
+|---|---|
+| CallKit ends outgoing calls immediately after `CXStartCallAction` on the simulator | `CallManager.useCallKit` is `false` in simulator builds; the in-app call screens are used. On a device CallKit drives the call and the native incoming-call UI appears. |
+| Starting WebRTC's voice-processing audio unit can deadlock CoreAudio and abort the process (`Initialize: RPC timeout. Apparently deadlocked`) | The audio unit stays off in the simulator, so `audio sent/received` packets are 0 while ICE/DTLS and the `transport` byte counters prove the media path. To try real audio: `xcrun simctl spawn <udid> defaults write $B simulatorAudioEnabled -bool YES` |
+| No VoIP push delivery | PushKit still registers and POSTs the token to `/api/user/voip-token`; the server only logs pushes until an APNs key is configured. |
+
+### VoIP push on a device
+
+`ios/WebRTCDialer/WebRTCDialer.entitlements` carries `aps-environment`. It is
+not wired into the build by default because the automatic "iOS Team
+Provisioning Profile" does not include Push Notifications and `xcodebuild`
+cannot add the capability headlessly. In Xcode, open the target's **Signing &
+Capabilities** tab and add **Push Notifications** once (it registers the App ID
+capability and sets `CODE_SIGN_ENTITLEMENTS`); after that PushKit delivers a
+token on the device.
+
 ## Next Steps
 
 ### For Full Testing
-1. Use a physical iPhone (VoIP needs device)
+1. Use a physical iPhone (CallKit UI and real audio need a device)
 2. Set up backend server
 3. Test between two devices
 
