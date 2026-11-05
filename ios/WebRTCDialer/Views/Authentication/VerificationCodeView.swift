@@ -31,7 +31,7 @@ struct VerificationCodeView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("Sent to \(phoneNumber)")
+                Text("Sent to \(PhoneNumberHelper.displayString(fromE164: phoneNumber))")
                     .font(.subheadline)
                     .foregroundColor(.gray)
             }
