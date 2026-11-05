@@ -12,6 +12,8 @@ This guide covers deploying the WebRTC Dialer backend to various platforms.
   - [DigitalOcean](#digitalocean)
   - [Heroku](#heroku)
   - [Railway](#railway)
+  - [Fly.io](#flyio)
+  - [Render](#render)
 - [VPS Manual Setup](#vps-manual-setup)
 - [SSL/TLS Configuration](#ssltls-configuration)
 - [Monitoring & Logging](#monitoring--logging)
@@ -132,7 +134,6 @@ docker build -t webrtc-backend:latest .
 docker run -d \
   --name webrtc-backend \
   -p 3000:3000 \
-  -p 3001:3001 \
   -e NODE_ENV=production \
   -e DB_HOST=your-db-host \
   -e DB_NAME=webrtc_dialer \
@@ -163,7 +164,7 @@ aws rds create-db-instance \
 **2. Launch EC2 Instance:**
 - AMI: Amazon Linux 2 or Ubuntu 22.04
 - Instance Type: t3.small or larger
-- Security Group: Allow ports 22, 80, 443, 3000, 3001
+- Security Group: Allow ports 22, 80, 443, 3000
 
 **3. SSH into EC2 and Setup:**
 ```bash
@@ -203,12 +204,13 @@ sudo nano /etc/nginx/conf.d/webrtc.conf
 ```
 
 ```nginx
+# REST API and Socket.IO signaling share one port (3000)
 upstream api_backend {
     server 127.0.0.1:3000;
 }
 
 upstream signaling_backend {
-    server 127.0.0.1:3001;
+    server 127.0.0.1:3000;
 }
 
 server {
@@ -225,6 +227,9 @@ server {
     }
 }
 
+# Optional: a separate hostname for signaling. A single hostname also works,
+# since Socket.IO connects to the API base URL (path /socket.io). The
+# Upgrade/Connection headers below are required for WebSocket.
 server {
     listen 80;
     server_name signaling.yourdomain.com;
@@ -381,6 +386,32 @@ railway variables set SMS_PROVIDER=twilio
 ```
 
 **Estimated Cost:** $5-20/month
+
+### Fly.io
+
+The repo includes `backend/fly.toml` (steps are also in the comments at the top of that file). It runs with `SKIP_DATABASE=true` and `SMS_PROVIDER=mock` initially, and serves the API and Socket.IO on one port.
+
+```bash
+cd backend
+brew install flyctl
+fly auth login
+fly launch --no-deploy --copy-config
+fly secrets set JWT_SECRET=$(openssl rand -base64 32) JWT_REFRESH_SECRET=$(openssl rand -base64 32)
+fly deploy
+```
+
+Verify with `curl https://<app>.fly.dev/health`, then set `https://<app>.fly.dev` in the iOS app under Settings → Server. Keep a single instance: signaling state (connected users, active calls) lives in process memory.
+
+### Render
+
+The repo includes a Render Blueprint, `backend/render.yaml` (`rootDir: backend`, JWT secrets auto-generated, `SKIP_DATABASE=true`, `SMS_PROVIDER=mock`).
+
+1. Push the repo to GitHub
+2. In Render: New → Blueprint → pick the repo
+3. Apply the Blueprint and wait for the deploy
+4. Verify with `curl https://<service>.onrender.com/health`, then set that URL in the iOS app under Settings → Server
+
+Render injects `PORT`, which the server uses for both the API and Socket.IO. Keep a single instance. Free-tier services sleep when idle, so the first request may be slow.
 
 ## VPS Manual Setup
 

@@ -73,14 +73,7 @@ In Xcode:
 
 ### 5. Update URLs
 
-Edit `Utilities/Constants.swift`:
-
-```swift
-enum API {
-    static let baseURL = "http://localhost:3000"
-    static let signalingURL = "ws://localhost:3000"
-}
-```
+The simulator default is `http://localhost:3000` (`defaultBaseURL` in `Utilities/Constants.swift`), so usually nothing needs editing. You can override it at runtime in the app under **Settings → Server** (Save, then "Test Connection"). `signalingURL` is derived from the base URL automatically (http→ws, https→wss, same host and port).
 
 ### 6. Run!
 

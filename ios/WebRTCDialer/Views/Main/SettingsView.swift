@@ -10,6 +10,15 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @State private var phoneNumber = UserDefaults.standard.string(forKey: Constants.UserDefaults.userPhoneNumber) ?? "Not set"
+    @State private var serverURL = UserDefaults.standard.string(forKey: Constants.UserDefaults.serverBaseURL) ?? ""
+    @State private var serverStatus: ServerStatus = .unknown
+
+    enum ServerStatus: Equatable {
+        case unknown
+        case checking
+        case reachable(String)
+        case unreachable(String)
+    }
 
     var body: some View {
         NavigationView {
@@ -22,6 +31,42 @@ struct SettingsView: View {
                         Text(phoneNumber)
                             .foregroundColor(.gray)
                     }
+                }
+
+                // Server
+                Section {
+                    TextField(Constants.API.defaultBaseURL, text: $serverURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit(saveServerURL)
+
+                    HStack {
+                        Button("Save") { saveServerURL() }
+                        Spacer()
+                        Button("Test Connection") { testConnection() }
+                            .disabled(serverStatus == .checking)
+                    }
+
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        switch serverStatus {
+                        case .unknown:
+                            Text("Not tested").foregroundColor(.gray)
+                        case .checking:
+                            ProgressView()
+                        case .reachable(let detail):
+                            Text(detail).foregroundColor(.green)
+                        case .unreachable(let detail):
+                            Text(detail).foregroundColor(.red)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                } header: {
+                    Text("Server")
+                } footer: {
+                    Text("REST API and call signaling share this address. Leave blank to use the default: \(Constants.API.defaultBaseURL)")
                 }
 
                 // Call Settings
@@ -83,6 +128,44 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+        }
+    }
+
+    private func saveServerURL() {
+        let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Constants.UserDefaults.serverBaseURL)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: Constants.UserDefaults.serverBaseURL)
+        }
+        serverURL = trimmed
+        serverStatus = .unknown
+    }
+
+    private func testConnection() {
+        saveServerURL()
+        guard let url = URL(string: "\(Constants.API.baseURL)/health") else {
+            serverStatus = .unreachable("Invalid URL")
+            return
+        }
+        serverStatus = .checking
+        Task {
+            do {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 8
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if code == 200,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let status = json["status"] as? String {
+                    let env = json["environment"] as? String ?? ""
+                    serverStatus = .reachable(env.isEmpty ? status : "\(status) (\(env))")
+                } else {
+                    serverStatus = .unreachable("HTTP \(code)")
+                }
+            } catch {
+                serverStatus = .unreachable(error.localizedDescription)
+            }
         }
     }
 }

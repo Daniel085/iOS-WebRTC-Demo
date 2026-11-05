@@ -209,17 +209,12 @@ We use Swift Package Manager (SPM) for dependencies - it's built into Xcode!
 
 1. **Open `Utilities/Constants.swift`**
 
-2. **Update API URLs**
-   ```swift
-   enum API {
-       // For testing with simulator, use localhost
-       static let baseURL = "http://localhost:3000"
-       static let signalingURL = "ws://localhost:3000"
+2. **Set the default API URL**
 
-       // For device testing with local backend:
-       // static let baseURL = "http://YOUR_IP:3000"
-       // static let signalingURL = "ws://YOUR_IP:3000"
-   }
+   Only `defaultBaseURL` needs editing. It is used unless overridden in the app under **Settings → Server** (Save, then "Test Connection"). `signalingURL` is derived from the base URL automatically (http→ws, https→wss, same host and port).
+   ```swift
+   // Simulator: http://localhost:3000
+   // Physical device with local backend: http://YOUR_IP:3000
    ```
 
 3. **Update Bundle ID** (if different)

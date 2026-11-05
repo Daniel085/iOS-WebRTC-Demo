@@ -9,7 +9,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy source code
 COPY . .
@@ -39,7 +39,7 @@ RUN mkdir -p logs && chown -R nodejs:nodejs logs
 USER nodejs
 
 # Expose ports
-EXPOSE 3000 3001
+EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
