@@ -250,6 +250,48 @@ Capabilities** tab and add **Push Notifications** once (it registers the App ID
 capability and sets `CODE_SIGN_ENTITLEMENTS`); after that PushKit delivers a
 token on the device.
 
+## Testing Simulator ↔ iPhone (verified 2026-11-05)
+
+A paired iPhone calling a simulator exercises the real CallKit path: the
+native incoming-call screen, `CXAnswerCallAction`, the audio-session
+hand-off (`provider(didActivate:)` → `RTCAudioSession.audioSessionDidActivate`)
+and real microphone audio.
+
+```bash
+# Build and install (team EB25CFP6UQ; no aps-environment entitlement, see above)
+xcodebuild -project ios/WebRTCDialer.xcodeproj -scheme WebRTCDialer \
+  -destination 'generic/platform=iOS' -derivedDataPath /tmp/dd build
+xcrun devicectl device install app --device <udid> /tmp/dd/Build/Products/Debug-iphoneos/WebRTCDialer.app
+# Launch with console output (the phone must be unlocked for this to succeed)
+xcrun devicectl device process launch --console --terminate-existing --device <udid> com.D3DigitalProductions.WebRTCDialer
+```
+
+The device default server is `http://<Mac LAN IP>:3000` (Constants.swift, override
+in Settings → Server); the simulator uses `http://localhost:3000`, both on the
+same backend. Sign in on both, dial the phone's number from the simulator and
+tap **Accept** on the phone's native call screen. Expected logs on the phone:
+
+```
+📡 [Signaling] ← incoming-call <id> from +1201555… video=false
+☎️ [CallKit] Perform answer <id>
+☎️ [CallKit] Audio session activated
+🎧 [WebRTC] ICE connection state → connected
+🎧 [WebRTC] Stats: audio sent 998 pkts/55647 B, audio received 0 pkts/0 B … ice=connected pc=connected
+```
+
+The simulator receives those packets (`audio received 997 pkts`) but sends none
+(its audio unit is off, see the limitations table). Hanging up on either side
+produces `call-end` → `call-ended`, both peer connections close and the phone
+logs `☎️ [CallKit] Audio session deactivated`.
+
+Gotchas on a device:
+
+| Symptom | Cause / fix |
+|---------|-------------|
+| `call-error … Recipient unavailable` although the phone registered a minute ago | iOS suspended the app when the phone auto-locked or went to the background and the socket dropped (`Client disconnected … transport close` in the backend log). Without a VoIP push token the backend cannot wake it. Keep the app in the foreground and the phone unlocked (or set Auto-Lock to Never while testing). |
+| `devicectl … launch` fails with "device was not, or could not be, unlocked" | Unlock the phone and retry; the install itself works while locked. |
+| App shows the login screen after a relaunch | The keychain token was cleared (e.g. Logout). Sign in again; the dev code is shown on screen. |
+
 ## Next Steps
 
 ### For Full Testing
