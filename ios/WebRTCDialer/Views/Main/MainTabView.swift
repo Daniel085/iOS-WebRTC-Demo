@@ -36,6 +36,16 @@ struct MainTabView: View {
                 }
                 .tag(3)
         }
+        // The keyboard covers the tab bar, so every tab needs its own way to dismiss it.
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            }
+        }
     }
 }
 
