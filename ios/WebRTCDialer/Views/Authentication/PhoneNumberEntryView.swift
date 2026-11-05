@@ -14,10 +14,12 @@ struct PhoneNumberEntryView: View {
     @Binding var devCode: String?
     @StateObject private var viewModel = PhoneNumberEntryViewModel()
     @State private var input = ""
+    @State private var country = PhoneNumberHelper.defaultCountry
+    @State private var showCountryPicker = false
     @FocusState private var isFieldFocused: Bool
 
     private var e164Number: String? {
-        PhoneNumberHelper.e164(from: input)
+        PhoneNumberHelper.e164(from: input, region: country.regionCode)
     }
 
     var body: some View {
@@ -45,14 +47,26 @@ struct PhoneNumberEntryView: View {
                     .fontWeight(.semibold)
 
                 HStack(spacing: 12) {
-                    Text(PhoneNumberHelper.countryCodePrefix)
-                        .font(.title3)
-                        .foregroundColor(.secondary)
+                    Button {
+                        isFieldFocused = false
+                        showCountryPicker = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(country.flag) \(country.dialCode)")
+                                .font(.title3)
+                                .foregroundColor(.primary)
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .disabled(viewModel.isLoading)
+                    .accessibilityLabel("Country: \(country.name), \(country.dialCode)")
 
                     Divider()
                         .frame(height: 24)
 
-                    TextField("(408) 555-0123", text: $input)
+                    TextField(PhoneNumberHelper.exampleNumber(for: country.regionCode), text: $input)
                         .keyboardType(.phonePad)
                         .textContentType(.telephoneNumber)
                         .font(.title3)
@@ -126,12 +140,13 @@ struct PhoneNumberEntryView: View {
         .contentShape(Rectangle())
         .onTapGesture { isFieldFocused = false }
         .onAppear {
-            if input.isEmpty && !phoneNumber.isEmpty {
-                input = PhoneNumberHelper.displayString(fromE164: phoneNumber)
+            if input.isEmpty, let saved = PhoneNumberHelper.split(e164: phoneNumber) {
+                country = saved.country
+                input = saved.national
             }
         }
         .onChange(of: input) { _, newValue in
-            let formatted = PhoneNumberHelper.formatAsYouType(newValue)
+            let formatted = PhoneNumberHelper.formatAsYouType(newValue, region: country.regionCode)
             if formatted != newValue {
                 input = formatted
             }
@@ -139,8 +154,16 @@ struct PhoneNumberEntryView: View {
         }
         .onChange(of: isFieldFocused) { _, focused in
             if !focused && !input.isEmpty && e164Number == nil {
-                viewModel.errorMessage = PhoneNumberEntryViewModel.incompleteNumberMessage(for: input)
+                viewModel.errorMessage = PhoneNumberEntryViewModel.incompleteNumberMessage(for: input, country: country)
             }
+        }
+        .onChange(of: country) { _, newCountry in
+            input = PhoneNumberHelper.formatAsYouType(input, region: newCountry.regionCode)
+            viewModel.errorMessage = nil
+            isFieldFocused = true
+        }
+        .sheet(isPresented: $showCountryPicker) {
+            CountryPickerView(selection: $country)
         }
     }
 }
@@ -168,11 +191,11 @@ class PhoneNumberEntryViewModel: ObservableObject {
         isLoading = false
     }
 
-    static func incompleteNumberMessage(for input: String) -> String {
-        if PhoneNumberHelper.digitCount(input) < 10 {
-            return "That number looks too short. Enter all 10 digits, including the area code."
+    static func incompleteNumberMessage(for input: String, country: Country) -> String {
+        if PhoneNumberHelper.isTooShort(input, region: country.regionCode) {
+            return "That number looks too short. Include the area code."
         }
-        return "That doesn't look like a valid phone number. Check the area code and try again."
+        return "That doesn't look like a valid \(country.name) number. Check the country and area code."
     }
 
     static func friendlyMessage(for error: Error) -> String {
@@ -188,6 +211,55 @@ class PhoneNumberEntryViewModel: ObservableObject {
             }
         }
         return "Something went wrong sending your code. Please try again."
+    }
+}
+
+struct CountryPickerView: View {
+    @Binding var selection: Country
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var filteredCountries: [Country] {
+        guard !searchText.isEmpty else { return PhoneNumberHelper.allCountries }
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        return PhoneNumberHelper.allCountries.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.dialCode.contains(query)
+                || $0.regionCode.caseInsensitiveCompare(query) == .orderedSame
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List(filteredCountries) { country in
+                Button {
+                    selection = country
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(country.flag)
+                        Text(country.name)
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Text(country.dialCode)
+                            .foregroundColor(.secondary)
+                        if country == selection {
+                            Image(systemName: "checkmark")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search countries or codes")
+            .navigationTitle("Country")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
     }
 }
 
