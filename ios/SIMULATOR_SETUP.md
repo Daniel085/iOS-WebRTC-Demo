@@ -267,6 +267,16 @@ Leave `NODE_ENV` unset for development builds (sandbox APNs). Until the key is
 configured the backend logs the push instead of sending it, and callers of a
 backgrounded phone get `Recipient unavailable`.
 
+Verified 2026-11-05 with the phone locked: the backend logs `VoIP push sent
+successfully`, the phone reconnects within a second, the server delivers the
+buffered offer and ICE candidates (`Delivered 10 buffered signaling
+message(s)`), the native call screen appears on the lock screen, and after
+Accept both sides reach `ICE connection state → connected` with audio flowing
+from the phone. Two backend pieces make this work with `SKIP_DATABASE=true`:
+the in-memory VoIP token store in `src/database/models/index.js`, and the
+per-call `pendingSignals` buffer in `src/signaling-server.js` that holds the
+caller's offer/candidates until the push-woken callee registers.
+
 ## Testing Simulator ↔ iPhone (verified 2026-11-05)
 
 A paired iPhone calling a simulator exercises the real CallKit path: the
