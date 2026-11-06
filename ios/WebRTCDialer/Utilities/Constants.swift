@@ -72,6 +72,8 @@ enum Constants {
         static let userPhoneNumber = "userPhoneNumber"
         static let voipDeviceToken = "voipDeviceToken"
         static let serverBaseURL = "serverBaseURL"
+        /// Simulator only: start WebRTC's audio unit (off by default, see WebRTCClient.initialize).
+        static let simulatorAudioEnabled = "simulatorAudioEnabled"
     }
 
     /// VoIP Configuration

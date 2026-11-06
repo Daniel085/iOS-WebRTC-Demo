@@ -10,7 +10,6 @@ import Combine
 
 struct ActiveCallView: View {
     @StateObject private var viewModel: ActiveCallViewModel
-    @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
 
     init(call: Call) {
@@ -118,7 +117,6 @@ struct ActiveCallView: View {
                 // End call button
                 Button(action: {
                     viewModel.endCall()
-                    dismiss()
                 }) {
                     Image(systemName: "phone.down.fill")
                         .font(.system(size: 28, weight: .medium))
@@ -318,8 +316,9 @@ class ActiveCallViewModel: ObservableObject {
     @Published var callDuration: TimeInterval = 0
 
     private let call: Call
-    private let callCoordinator = CallCoordinator.shared
+    private let callManager = CallManager.shared
     private var timer: Timer?
+    private var cancellables = Set<AnyCancellable>()
 
     var isMuted: Bool { call.isMuted }
     var isSpeakerOn: Bool { call.isSpeakerOn }
@@ -337,8 +336,11 @@ class ActiveCallViewModel: ObservableObject {
     }
 
     var callStatusText: String {
-        if call.state == .connected && callDuration > 0 {
+        if call.state == .connected {
             return formatDuration(callDuration)
+        }
+        if let detail = call.statusDetail, !detail.isEmpty {
+            return "\(call.state.description) · \(detail)"
         }
         return call.state.description
     }
@@ -346,10 +348,23 @@ class ActiveCallViewModel: ObservableObject {
     init(call: Call) {
         self.call = call
 
-        // Start call timer when connected
-        if call.state == .connected {
-            startTimer()
-        }
+        // Re-render whenever the Call changes (state, mute, speaker...).
+        call.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        // Start the duration timer when the call connects.
+        call.$state
+            .removeDuplicates()
+            .sink { [weak self] state in
+                guard let self else { return }
+                if state == .connected {
+                    self.startTimer()
+                } else if state == .ended || state == .failed {
+                    self.timer?.invalidate()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     deinit {
@@ -357,23 +372,26 @@ class ActiveCallViewModel: ObservableObject {
     }
 
     private func startTimer() {
+        timer?.invalidate()
+        callDuration = call.duration
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.callDuration += 1
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.callDuration = self.call.duration
             }
         }
     }
 
     func toggleMute() {
-        callCoordinator.toggleMute()
+        callManager.toggleMute()
     }
 
     func toggleSpeaker() {
-        callCoordinator.toggleSpeaker()
+        callManager.toggleSpeaker()
     }
 
     func toggleVideo() {
-        callCoordinator.toggleVideo()
+        callManager.toggleVideo()
     }
 
     func toggleKeypad() {
@@ -394,13 +412,12 @@ class ActiveCallViewModel: ObservableObject {
 
     func sendDTMF(_ digit: String) {
         dtmfDigits += digit
-        // TODO: Send actual DTMF tone
-        print("DTMF: \(digit)")
+        callManager.sendDTMF(digit)
     }
 
     func endCall() {
         timer?.invalidate()
-        callCoordinator.endCall()
+        callManager.endCall()
     }
 
     private func formatDuration(_ duration: TimeInterval) -> String {

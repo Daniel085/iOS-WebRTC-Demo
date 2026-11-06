@@ -10,7 +10,6 @@ import Combine
 
 struct IncomingCallView: View {
     @StateObject private var viewModel: IncomingCallViewModel
-    @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
 
     init(call: Call) {
@@ -101,7 +100,6 @@ struct IncomingCallView: View {
                     VStack(spacing: 12) {
                         Button(action: {
                             viewModel.declineCall()
-                            dismiss()
                         }) {
                             ZStack {
                                 Circle()
@@ -124,7 +122,6 @@ struct IncomingCallView: View {
                     VStack(spacing: 12) {
                         Button(action: {
                             viewModel.acceptCall()
-                            dismiss()
                         }) {
                             ZStack {
                                 Circle()
