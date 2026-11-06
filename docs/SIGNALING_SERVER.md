@@ -154,6 +154,8 @@ interface ErrorMessage {
 
 ## Node.js Implementation
 
+> **Note:** In the reference implementation (`backend/src/index.js`), Socket.IO is attached to the REST API's HTTP server, so signaling shares the API's port (3000 by default; `PORT`/`API_PORT` override). Clients connect to the same base URL as the API (path `/socket.io`). Server-side, `offer`, `answer` and `ice-candidate` are routed to the other participant of the call based on the authenticated sender; any client-supplied `to` field is ignored.
+
 ### Server Setup
 
 ```javascript

@@ -1,0 +1,26 @@
+# Render Blueprint for the WebRTC Dialer backend.
+# In the Render dashboard: New → Blueprint → pick this GitHub repo. Render reads
+# this file and creates the service. WebSockets are supported on all plans.
+services:
+  - type: web
+    name: webrtc-dialer-backend
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: starter        # "free" also works but sleeps after 15 min idle (drops Socket.IO sessions)
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SKIP_DATABASE
+        value: "true"
+      - key: SMS_PROVIDER
+        value: mock
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: LOG_LEVEL
+        value: info
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true

@@ -12,6 +12,9 @@ if (process.env.SKIP_DATABASE === 'true') {
 
   // Mock database for development without PostgreSQL
   const mockUsers = new Map();
+  const mockVoipTokens = [];
+  const matchesWhere = (row, where) =>
+    Object.entries(where).every(([key, value]) => row[key] === value);
 
   const db = {
     User: {
@@ -49,10 +52,47 @@ if (process.env.SKIP_DATABASE === 'true') {
       update: async () => ({})
     },
     VoipToken: {
-      create: async () => ({}),
-      findOne: async () => null,
-      update: async () => ({}),
-      destroy: async () => ({})
+      // In-memory token store so VoIP pushes work without PostgreSQL.
+      create: async (data) => {
+        const record = {
+          id: `mock-voip-${Date.now()}-${mockVoipTokens.length}`,
+          userId: data.userId,
+          token: data.token,
+          deviceId: data.deviceId || null,
+          isActive: data.isActive !== false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          update: async (updates) => {
+            Object.assign(record, updates, { updatedAt: new Date() });
+            return record;
+          }
+        };
+        mockVoipTokens.push(record);
+        return record;
+      },
+      findOne: async ({ where = {} } = {}) => {
+        const matches = mockVoipTokens
+          .filter((t) => t.isActive && matchesWhere(t, where))
+          .sort((a, b) => b.createdAt - a.createdAt);
+        return matches[0] || null;
+      },
+      update: async (updates, { where = {} } = {}) => {
+        let count = 0;
+        for (const t of mockVoipTokens) {
+          if (matchesWhere(t, where)) {
+            Object.assign(t, updates, { updatedAt: new Date() });
+            count++;
+          }
+        }
+        return [count];
+      },
+      destroy: async ({ where = {} } = {}) => {
+        const before = mockVoipTokens.length;
+        for (let i = mockVoipTokens.length - 1; i >= 0; i--) {
+          if (matchesWhere(mockVoipTokens[i], where)) mockVoipTokens.splice(i, 1);
+        }
+        return before - mockVoipTokens.length;
+      }
     },
     Call: {
       create: async () => ({}),

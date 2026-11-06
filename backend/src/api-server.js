@@ -18,6 +18,10 @@ const { errorHandler } = require('./middleware/errorHandler');
 function createApiServer() {
   const app = express();
 
+  // Behind a reverse proxy / PaaS load balancer (Fly.io, Render, Nginx...),
+  // trust the first proxy hop so rate limiting and logging see the real client IP.
+  app.set('trust proxy', 1);
+
   // Security middleware
   app.use(helmet());
   app.use(cors({

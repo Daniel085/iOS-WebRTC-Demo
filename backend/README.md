@@ -6,7 +6,7 @@ Production-ready backend services for the iOS WebRTC Dialer application.
 
 This backend provides:
 - **REST API** for user authentication and management (Port 3000)
-- **WebSocket Signaling Server** for real-time call signaling (Port 3001)
+- **WebSocket Signaling Server** (Socket.IO) for real-time call signaling, served on the same port as the API (3000; `PORT` or `API_PORT` overrides it)
 - **Database** with PostgreSQL for persistent storage
 - **VoIP Push Notifications** via Apple Push Notification service
 - **SMS Verification** via Twilio, AWS SNS, or Firebase
@@ -72,9 +72,11 @@ npm run db:migrate
 npm run dev
 ```
 
-The servers will start:
+The server will start on a single port:
 - API: http://localhost:3000
-- Signaling: http://localhost:3001
+- Signaling (Socket.IO, path `/socket.io`): http://localhost:3000
+
+`SIGNALING_PORT` is ignored (a warning is logged). `npm run dev:signaling` still runs a standalone signaling server on 3001 for debugging only.
 
 ### 5. Test the API
 
@@ -255,9 +257,9 @@ DELETE /api/user/account
 
 ## WebSocket Signaling Events
 
-Connect to signaling server:
+Connect to the signaling server (same base URL as the API):
 ```javascript
-const socket = io('ws://localhost:3001', {
+const socket = io('http://localhost:3000', {
   auth: {
     token: 'your-jwt-token'
   }
@@ -495,7 +497,26 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for:
 - DigitalOcean
 - Heroku
 - Railway
+- Fly.io
+- Render
 - VPS manual setup
+
+#### Deploy to Fly.io / Render
+
+Both configs start with `SKIP_DATABASE=true` and `SMS_PROVIDER=mock` (the `/api/auth/send-code` response then includes `devCode`).
+
+**Fly.io** (`fly.toml`, steps also in the comments at the top of the file):
+```bash
+brew install flyctl
+fly auth login
+fly launch --no-deploy --copy-config
+fly secrets set JWT_SECRET=... JWT_REFRESH_SECRET=...
+fly deploy
+```
+
+**Render** (`render.yaml` Blueprint): New → Blueprint → pick the repo. `rootDir` is `backend` and the JWT secrets are auto-generated.
+
+Run a single instance: signaling state (connected users, active calls) is held in process memory. Then set the URL in the iOS app under Settings → Server.
 
 ## Configuration
 
@@ -666,21 +687,17 @@ kill -9 <PID>
    npm run dev
    ```
 
-2. **Update iOS app constants** (`ios/WebRTCDialer/Utilities/Constants.swift`):
-   ```swift
-   enum API {
-       static let baseURL = "http://localhost:3000"
-       static let signalingURL = "ws://localhost:3001"
-   }
-   ```
+2. **Server URL**: the iOS app's server URL is configured at runtime in **Settings → Server** (text field, Save, and "Test Connection", which calls `GET /health`). The build default is `defaultBaseURL` in `ios/WebRTCDialer/Utilities/Constants.swift` (`http://localhost:3000` on the simulator). `signalingURL` is derived automatically from the base URL (http→ws, https→wss, same host and port).
 
 3. **For device testing** (not simulator):
    - Get your computer's local IP: `ifconfig | grep inet`
-   - Update iOS constants:
-     ```swift
-     static let baseURL = "http://192.168.1.100:3000"
-     static let signalingURL = "ws://192.168.1.100:3001"
-     ```
+   - Enter `http://<your-ip>:3000` in Settings → Server (or edit `defaultBaseURL` in `Constants.swift`)
+
+4. **Smoke test signaling** (server must be running; `BASE` env var overrides `http://localhost:3000`):
+   ```bash
+   npm run smoke
+   ```
+   It authenticates two users and exercises call-initiate → incoming-call → offer → answer → ice-candidate → call-end.
 
 ## Support
 

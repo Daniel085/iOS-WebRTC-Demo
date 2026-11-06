@@ -28,8 +28,7 @@ Get the app running in 5 minutes without PostgreSQL setup.
    ```
    ⚠️  Running WITHOUT database (SKIP_DATABASE=true)
    ⚠️  User data will NOT persist. For production, set up PostgreSQL.
-   ✓ API Server running on port 3000
-   ✓ Signaling Server running on port 3001
+   ✓ API Server running on port 3000 (Socket.IO signaling shares this port)
    ```
 
 ## iOS App Setup (3 minutes)
@@ -58,6 +57,8 @@ Get the app running in 5 minutes without PostgreSQL setup.
 
 5. **Build and run:**
    - Press ⌘R
+
+6. **Physical device:** in the app open Settings → Server, enter `http://<your-mac-ip>:3000`, tap Save, then Test Connection.
 
 ## Testing Authentication
 
@@ -92,11 +93,11 @@ Get the app running in 5 minutes without PostgreSQL setup.
 
 **"Could not connect to the server"**
 - Make sure backend is running: `cd backend && npm run dev`
-- Check `ios/WebRTCDialer/Utilities/Constants.swift` has correct URLs
+- Check the server URL in the app under Settings → Server (use Test Connection); the build default is `defaultBaseURL` in `ios/WebRTCDialer/Utilities/Constants.swift`
 - Verify App Transport Security is configured in Xcode
 
 **"Certificate is invalid"**
-- Make sure you're using `http://` not `https://` in Constants.swift
+- Make sure you're using `http://` not `https://` for a local server
 - Backend URL should be `http://localhost:3000`
 
 **Can't find verification code**
