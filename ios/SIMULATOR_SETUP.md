@@ -242,13 +242,30 @@ Launch with `xcrun simctl launch --console-pty <udid> $B` to see those logs.
 
 ### VoIP push on a device
 
-`ios/WebRTCDialer/WebRTCDialer.entitlements` carries `aps-environment`. It is
-not wired into the build by default because the automatic "iOS Team
-Provisioning Profile" does not include Push Notifications and `xcodebuild`
-cannot add the capability headlessly. In Xcode, open the target's **Signing &
-Capabilities** tab and add **Push Notifications** once (it registers the App ID
-capability and sets `CODE_SIGN_ENTITLEMENTS`); after that PushKit delivers a
-token on the device.
+The target signs with `ios/WebRTCDialer/WebRTCDialer.entitlements`
+(`aps-environment`), and the Push Notifications capability is registered on
+the App ID (done in Xcode's Signing & Capabilities tab on 2026-11-05). On a
+device the app logs `📲 [VoIP Push] Token: …` and `Token registered with
+backend` right after signing in. If a device build fails with "Provisioning
+profile … doesn't include the Push Notifications capability" or "PLA Update
+available", accept the latest Program License Agreement at
+developer.apple.com and rebuild with `-allowProvisioningUpdates`.
+
+To make the backend actually send pushes, create an APNs auth key
+(developer.apple.com → Keys → enable APNs), save the `.p8` under
+`backend/certs/` (gitignored) and set in `backend/.env`:
+
+```
+APN_AUTH_METHOD=token
+APN_KEY_PATH=./certs/AuthKey_<KEYID>.p8
+APN_KEY_ID=<KEYID>
+APN_TEAM_ID=EB25CFP6UQ
+VOIP_BUNDLE_ID=com.D3DigitalProductions.WebRTCDialer.voip
+```
+
+Leave `NODE_ENV` unset for development builds (sandbox APNs). Until the key is
+configured the backend logs the push instead of sending it, and callers of a
+backgrounded phone get `Recipient unavailable`.
 
 ## Testing Simulator ↔ iPhone (verified 2026-11-05)
 
