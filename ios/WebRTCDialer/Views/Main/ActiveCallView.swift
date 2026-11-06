@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+@preconcurrency import WebRTC
 
 struct ActiveCallView: View {
     @StateObject private var viewModel: ActiveCallViewModel
@@ -18,46 +19,22 @@ struct ActiveCallView: View {
 
     var body: some View {
         ZStack {
-            // Background
-            (colorScheme == .dark ? Color.black : Color(white: 0.95))
-                .ignoresSafeArea()
+            if viewModel.showsVideo {
+                videoLayer
+            } else {
+                // Background
+                (colorScheme == .dark ? Color.black : Color(white: 0.95))
+                    .ignoresSafeArea()
+            }
 
             VStack(spacing: 0) {
-                Spacer()
-                    .frame(height: 80)
-
-                // Caller info section
-                VStack(spacing: 12) {
-                    // Profile image placeholder
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.blue]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 120, height: 120)
-
-                        Text(viewModel.initials)
-                            .font(.system(size: 48, weight: .light))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.bottom, 20)
-
-                    // Caller name/number
-                    Text(viewModel.displayName)
-                        .font(.system(size: 34, weight: .light))
-                        .foregroundColor(.primary)
-
-                    // Call status
-                    Text(viewModel.callStatusText)
-                        .font(.system(size: 17))
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
+                if viewModel.showsVideo {
+                    videoHeader
+                } else {
+                    Spacer()
+                        .frame(height: 80)
+                    callerInfo
                 }
-                .padding(.top, 40)
 
                 Spacer()
 
@@ -87,14 +64,23 @@ struct ActiveCallView: View {
                         )
                     }
 
-                    // Second row: add call, video, contacts
+                    // Second row: flip/add call, video, contacts
                     HStack(spacing: 60) {
-                        CallControlButton(
-                            icon: "plus",
-                            label: "add call",
-                            isActive: false,
-                            action: { viewModel.addCall() }
-                        )
+                        if viewModel.isVideoEnabled {
+                            CallControlButton(
+                                icon: "arrow.triangle.2.circlepath.camera.fill",
+                                label: "flip",
+                                isActive: false,
+                                action: { viewModel.flipCamera() }
+                            )
+                        } else {
+                            CallControlButton(
+                                icon: "plus",
+                                label: "add call",
+                                isActive: false,
+                                action: { viewModel.addCall() }
+                            )
+                        }
 
                         CallControlButton(
                             icon: viewModel.isVideoEnabled ? "video.fill" : "video.slash.fill",
@@ -149,6 +135,95 @@ struct ActiveCallView: View {
             }
         }
         .navigationBarHidden(true)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.showsVideo)
+    }
+
+    // MARK: Audio layout
+
+    private var callerInfo: some View {
+        VStack(spacing: 12) {
+            // Profile image placeholder
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.blue]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 120, height: 120)
+
+                Text(viewModel.initials)
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundColor(.white)
+            }
+            .padding(.bottom, 20)
+
+            // Caller name/number
+            Text(viewModel.displayName)
+                .font(.system(size: 34, weight: .light))
+                .foregroundColor(.primary)
+
+            // Call status
+            Text(viewModel.callStatusText)
+                .font(.system(size: 17))
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
+        }
+        .padding(.top, 40)
+    }
+
+    // MARK: Video layout
+
+    /// Remote video full screen (or a dark placeholder while the other party's
+    /// camera is off) with the local preview floating bottom-right.
+    private var videoLayer: some View {
+        ZStack(alignment: .topTrailing) {
+            if let remote = viewModel.remoteVideoTrack {
+                VideoView(track: remote, contentMode: .scaleAspectFill)
+                    .ignoresSafeArea()
+                    .accessibilityLabel("Remote video")
+            } else {
+                Color.black.ignoresSafeArea()
+                VStack(spacing: 8) {
+                    Image(systemName: "video.slash")
+                        .font(.system(size: 36))
+                    Text("\(viewModel.displayName)'s camera is off")
+                        .font(.subheadline)
+                }
+                .foregroundColor(.white.opacity(0.7))
+                .frame(maxWidth: .infinity)
+                .padding(.top, 220)
+            }
+
+            // Self view, below the name/status header and clear of the controls.
+            if let local = viewModel.localVideoTrack {
+                VideoView(track: local, contentMode: .scaleAspectFill, mirrored: viewModel.isFrontCamera)
+                    .frame(width: 110, height: 160)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.6), lineWidth: 1))
+                    .shadow(radius: 6)
+                    .padding(.trailing, 16)
+                    .padding(.top, 150)
+                    .accessibilityLabel("Local video preview")
+            }
+        }
+    }
+
+    private var videoHeader: some View {
+        VStack(spacing: 4) {
+            Text(viewModel.displayName)
+                .font(.system(size: 24, weight: .medium))
+            Text(viewModel.callStatusText)
+                .font(.system(size: 15))
+                .opacity(0.8)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+        .padding(.top, 60)
     }
 }
 
@@ -323,6 +398,10 @@ class ActiveCallViewModel: ObservableObject {
     var isMuted: Bool { call.isMuted }
     var isSpeakerOn: Bool { call.isSpeakerOn }
     var isVideoEnabled: Bool { call.isVideoEnabled }
+    var showsVideo: Bool { call.showsVideo }
+    var localVideoTrack: RTCVideoTrack? { call.localVideoTrack }
+    var remoteVideoTrack: RTCVideoTrack? { call.remoteVideoTrack }
+    var isFrontCamera: Bool { call.isFrontCamera }
 
     var displayName: String {
         call.phoneNumber
@@ -392,6 +471,10 @@ class ActiveCallViewModel: ObservableObject {
 
     func toggleVideo() {
         callManager.toggleVideo()
+    }
+
+    func flipCamera() {
+        callManager.flipCamera()
     }
 
     func toggleKeypad() {

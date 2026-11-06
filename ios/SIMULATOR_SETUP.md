@@ -161,7 +161,7 @@ node mock.js
 
 ❌ VoIP pushes (need device)
 ❌ Real calls (need device)
-❌ Camera (no camera)
+⚠️ Camera (none: video calls send a synthetic test pattern, see "Testing video calls")
 
 ## Common Issues
 
@@ -239,6 +239,73 @@ Launch with `xcrun simctl launch --console-pty <udid> $B` to see those logs.
 | CallKit ends outgoing calls immediately after `CXStartCallAction` on the simulator | `CallManager.useCallKit` is `false` in simulator builds; the in-app call screens are used. On a device CallKit drives the call and the native incoming-call UI appears. |
 | Starting WebRTC's voice-processing audio unit can deadlock CoreAudio and abort the process (`Initialize: RPC timeout. Apparently deadlocked`) | The audio unit stays off in the simulator, so `audio sent/received` packets are 0 while ICE/DTLS and the `transport` byte counters prove the media path. To try real audio: `xcrun simctl spawn <udid> defaults write $B simulatorAudioEnabled -bool YES` |
 | No VoIP push delivery | PushKit still registers and POSTs the token to `/api/user/voip-token`; the server only logs pushes until an APNs key is configured. |
+
+### Testing video calls (verified 2026-11-05)
+
+Video uses the same call and the same signaling: the backend relays
+`offer`/`answer` from either side, so adding or removing video mid-call is a
+plain renegotiation (no protocol change). Two entry points:
+
+- **Keypad → camera button** (left of the green call button): the call starts
+  with video (`call-initiate hasVideo=true`); the callee's incoming screen shows
+  "FaceTime Video" and answers with its own camera on.
+- **In-call → video button**: turns the local camera on or off during any call,
+  including an audio call. **flip** switches front/back camera.
+
+#### Simulator camera limitation
+
+The simulator has no camera (`RTCCameraVideoCapturer.captureDevices()` is
+empty), so `WebRTCClient` feeds the video track from `SyntheticVideoCapturer`:
+640x480 @ 15 fps scrolling colour bars with a moving white stripe. "flip"
+switches to a grey ramp so the change is visible on the other side. Metal
+rendering (`RTCMTLVideoView`) works on the simulator. Software encoding in a
+Debug build is slow (hundreds of ms per frame), so libwebrtc adapts the stream
+down to 320x240 and a few fps; that is expected. On a device the front camera
+is used at the supported format closest to 640x480@30.
+
+#### Steps
+
+1. Set up both simulators as in "Testing App-to-App Calls on Two Simulators".
+2. On B: Keypad, dial `2015550102`, tap the **camera** button. A shows the
+   incoming screen with "FaceTime Video"; tap **Accept**.
+3. Both screens show the other side's test pattern full screen with their own
+   (mirrored) preview tile top-right. Expected logs:
+
+```
+B: 🎧 [WebRTC] Video transceiver added (sendrecv, 640x480@30)
+B: 📡 [Signaling] → call-initiate … hasVideo=true
+B: 🎧 [WebRTC] No camera available (simulator?); using a synthetic video source
+A: 🎧 [WebRTC] Remote stream added: 1 audio, 1 video
+A: 🎧 [WebRTC] Transceivers (preferred/negotiated): audio[mid 0] sendrecv/sendrecv, video[mid 1] sendrecv/sendrecv
+A: 🎧 [WebRTC] Remote video active
+A: 🎧 [WebRTC] Stats: … video sent 90 pkts/63 frames, video received 75 pkts/62 frames … ice=connected pc=connected
+```
+
+4. Tap **video** on A to turn the camera off. A renegotiates and B sees the
+   "camera is off" placeholder:
+
+```
+A: 🎧 [WebRTC] Local video disabled
+A: 🎧 [WebRTC] Renegotiation offer created
+A: 📡 [Signaling] → offer …            B: 📡 [Signaling] ← offer …
+B: 🎧 [WebRTC] Transceivers (preferred/negotiated): audio[mid 0] sendrecv/sendrecv, video[mid 1] sendrecv/sendonly
+B: 🎧 [WebRTC] Remote video stopped
+A: 📡 [Signaling] ← answer …
+A: 🎧 [WebRTC] Transceivers (preferred/negotiated): audio[mid 0] sendrecv/sendrecv, video[mid 1] recvonly/recvonly
+```
+
+5. Tap **video** on A again: `Video transceiver reused (mid 1) → sendrecv`,
+   another offer/answer, and B logs `Remote video active`. Tap **flip** on A:
+   `Camera position → back` and B's full-screen view turns grey.
+6. Audio-only calls are unchanged: the green call button produces only
+   `audio[mid 0]` in the transceiver log, `Remote stream added: 1 audio, 0
+   video`, and the stats line has no video counters. Tapping **video** during
+   such a call upgrades it (the other side gets `video[mid 1] recvonly/recvonly`
+   and shows the video layout with its own camera still off).
+
+If both sides toggle at the same moment the offers collide; the callee (polite
+peer) rolls back its offer, answers the caller's, then re-offers, so the second
+change still lands.
 
 ### VoIP push on a device
 

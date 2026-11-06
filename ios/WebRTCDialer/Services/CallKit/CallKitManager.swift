@@ -61,6 +61,13 @@ final class CallKitManager: NSObject {
         request(action, completion: completion)
     }
 
+    /// Tell the system a call gained or lost video (mid-call toggle).
+    func reportCallUpdated(uuid: UUID, hasVideo: Bool) {
+        let update = CXCallUpdate()
+        update.hasVideo = hasVideo
+        provider.reportCall(with: uuid, updated: update)
+    }
+
     func reportIncomingCall(uuid: UUID, handle: String, hasVideo: Bool, completion: @escaping @MainActor (Error?) -> Void) {
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .phoneNumber, value: handle)

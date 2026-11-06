@@ -2,8 +2,9 @@
 //  WebRTCClient.swift
 //  WebRTCDialer
 //
-//  One RTCPeerConnection per call. Audio-only today; `hasVideo` is plumbed
-//  through so a video track can be added later without changing callers.
+//  One RTCPeerConnection per call. Audio always; video is added behind
+//  `hasVideo` (at call start) or mid-call through `setVideoEnabled`, which
+//  renegotiates with a fresh offer that CallManager relays over signaling.
 //
 //  Threading: the public API and the delegate callbacks are main-actor.
 //  libwebrtc invokes RTCPeerConnectionDelegate on its own threads, so a small
@@ -19,16 +20,27 @@ protocol WebRTCClientDelegate: AnyObject {
     func webRTCClient(_ client: WebRTCClient, didGenerateLocalCandidate candidate: SignalingIceCandidate)
     func webRTCClient(_ client: WebRTCClient, didChangeIceConnectionState state: RTCIceConnectionState)
     func webRTCClient(_ client: WebRTCClient, didChangePeerConnectionState state: RTCPeerConnectionState)
+    /// A local media change (video on/off) produced a new offer that must be
+    /// sent to the other party. The remote answer comes back via `setRemoteAnswer`.
+    func webRTCClient(_ client: WebRTCClient, didCreateRenegotiationOffer sdp: String)
+    /// The local camera track to preview (nil when video is off).
+    func webRTCClient(_ client: WebRTCClient, didChangeLocalVideoTrack track: RTCVideoTrack?)
+    /// The remote video track, non-nil only while the other party is sending video.
+    func webRTCClient(_ client: WebRTCClient, didChangeRemoteVideoTrack track: RTCVideoTrack?)
 }
 
 enum WebRTCClientError: LocalizedError {
     case peerConnectionUnavailable
     case closed
+    case noCamera
+    case transceiverUnavailable
 
     var errorDescription: String? {
         switch self {
         case .peerConnectionUnavailable: return "Could not create the peer connection"
         case .closed: return "The peer connection is closed"
+        case .noCamera: return "No camera is available"
+        case .transceiverUnavailable: return "Could not add the video transceiver"
         }
     }
 }
@@ -73,9 +85,24 @@ final class WebRTCClient {
 
     // MARK: Instance state
 
-    weak var delegate: WebRTCClientDelegate?
+    weak var delegate: WebRTCClientDelegate? {
+        didSet {
+            // A video call creates its local track in init, before the
+            // delegate exists; hand it over as soon as one is attached.
+            if let track = localVideoTrack, isVideoEnabled {
+                delegate?.webRTCClient(self, didChangeLocalVideoTrack: track)
+            }
+        }
+    }
 
+    /// Whether the call was set up as a video call (local video added before
+    /// the first offer/answer). Video can still be turned on later.
     let hasVideo: Bool
+
+    /// Perfect-negotiation role. The polite peer (the callee) rolls back its
+    /// own pending offer when the other side's offer collides with it; the
+    /// impolite peer ignores the colliding offer.
+    let isPolite: Bool
 
     private var peerConnection: RTCPeerConnection?
     private var observer: PeerConnectionObserver?
@@ -87,13 +114,27 @@ final class WebRTCClient {
     private(set) var iceConnectionState: RTCIceConnectionState = .new
     private(set) var connectionState: RTCPeerConnectionState = .new
 
-    private static let sdpConstraints = RTCMediaConstraints(
-        mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": "false"],
-        optionalConstraints: nil
-    )
+    // Video
+    private(set) var isVideoEnabled = false
+    private(set) var localVideoTrack: RTCVideoTrack?
+    private(set) var remoteVideoTrack: RTCVideoTrack?
+    private(set) var cameraPosition: AVCaptureDevice.Position = .front
+    private var videoSource: RTCVideoSource?
+    private var videoTransceiver: RTCRtpTransceiver?
+    private var cameraCapturer: RTCCameraVideoCapturer?
+    private var syntheticCapturer: SyntheticVideoCapturer?
+    /// A local change happened while an offer/answer exchange was in flight;
+    /// a new offer is created as soon as signaling is back to `stable`.
+    private var renegotiationPending = false
 
-    init(iceServers: [RTCIceServer]? = nil, hasVideo: Bool = false) throws {
+    /// Target camera format; the closest supported one is used.
+    static let preferredVideoWidth: Int32 = 640
+    static let preferredVideoHeight: Int32 = 480
+    static let preferredVideoFps = 30
+
+    init(iceServers: [RTCIceServer]? = nil, hasVideo: Bool = false, isPolite: Bool = false) throws {
         self.hasVideo = hasVideo
+        self.isPolite = isPolite
         let iceServers = iceServers ?? WebRTCClient.defaultIceServers()
 
         let config = RTCConfiguration()
@@ -118,6 +159,17 @@ final class WebRTCClient {
 
         addLocalAudioTrack()
         log("Peer connection created (ice servers: \(iceServers.flatMap { $0.urlStrings }))")
+
+        if hasVideo {
+            // The transceiver must exist before the first offer/answer; the
+            // capturer starts asynchronously and feeds frames once it is up.
+            do {
+                try attachLocalVideo()
+                Task { [weak self] in await self?.startVideoCapture() }
+            } catch {
+                log("Could not add video: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// Whether the simulator should start the real audio unit (see `initialize`).
@@ -139,7 +191,7 @@ final class WebRTCClient {
         return servers
     }
 
-    // MARK: Local media
+    // MARK: Local audio
 
     private func addLocalAudioTrack() {
         guard let pc = peerConnection else { return }
@@ -154,21 +206,195 @@ final class WebRTCClient {
         set { audioTrack?.isEnabled = !newValue; log("Microphone \(newValue ? "muted" : "unmuted")") }
     }
 
+    // MARK: Local video
+
+    /// Turn the camera on or off. Turning it on adds (or re-activates) the
+    /// video transceiver and starts capture; turning it off stops capture and
+    /// makes the transceiver receive-only. Both renegotiate: the new offer is
+    /// handed to the delegate (or deferred until the current exchange ends).
+    func setVideoEnabled(_ enabled: Bool) async throws {
+        guard peerConnection != nil else { throw WebRTCClientError.closed }
+        guard enabled != isVideoEnabled else { return }
+        if enabled {
+            try attachLocalVideo()
+            await startVideoCapture()
+        } else {
+            await stopVideoCapture()
+            localVideoTrack?.isEnabled = false
+            if let transceiver = videoTransceiver {
+                try WebRTCClient.setDirection(.recvOnly, on: transceiver)
+            }
+            isVideoEnabled = false
+            log("Local video disabled")
+            delegate?.webRTCClient(self, didChangeLocalVideoTrack: nil)
+        }
+        await renegotiate()
+    }
+
+    /// Switch between the front and back camera (on the simulator, between
+    /// the two synthetic test patterns).
+    func switchCamera() {
+        cameraPosition = (cameraPosition == .front) ? .back : .front
+        log("Camera position → \(cameraPosition == .front ? "front" : "back")")
+        guard isVideoEnabled else { return }
+        if let synthetic = syntheticCapturer {
+            synthetic.pattern = (cameraPosition == .front) ? .front : .back
+            return
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.stopVideoCapture()
+            await self.startVideoCapture()
+        }
+    }
+
+    /// `setDirection:error:` is not imported as `throws` (its name clashes with
+    /// the `direction` setter), so bridge the NSError by hand.
+    private static func setDirection(_ direction: RTCRtpTransceiverDirection, on transceiver: RTCRtpTransceiver) throws {
+        var error: NSError?
+        transceiver.setDirection(direction, error: &error)
+        if let error { throw error }
+    }
+
+    /// Create the local video track/transceiver (idempotent) and mark it as sending.
+    private func attachLocalVideo() throws {
+        guard let pc = peerConnection else { throw WebRTCClientError.closed }
+        let track: RTCVideoTrack
+        if let existing = localVideoTrack {
+            track = existing
+        } else {
+            let source = WebRTCClient.factory.videoSource()
+            track = WebRTCClient.factory.videoTrack(with: source, trackId: "video0")
+            videoSource = source
+            localVideoTrack = track
+        }
+        track.isEnabled = true
+
+        if let transceiver = videoTransceiver
+            ?? pc.transceivers.first(where: { $0.mediaType == .video && !$0.isStopped }) {
+            // Either our own (video was turned off earlier) or one the remote
+            // offer created for its video: reuse it and send on it too.
+            transceiver.sender.track = track
+            transceiver.sender.streamIds = ["stream0"]
+            try WebRTCClient.setDirection(.sendRecv, on: transceiver)
+            videoTransceiver = transceiver
+            log("Video transceiver reused (mid \(transceiver.mid)) → sendrecv")
+        } else {
+            // addTrack, not addTransceiver: only transceivers created by
+            // addTrack may be associated with a video m-line in a remote offer
+            // (JSEP 5.10), which is what lets the callee answer sendrecv.
+            guard let sender = pc.add(track, streamIds: ["stream0"]),
+                  let transceiver = pc.transceivers.first(where: { $0.sender == sender }) else {
+                throw WebRTCClientError.transceiverUnavailable
+            }
+            videoTransceiver = transceiver
+            log("Video transceiver added (sendrecv, \(WebRTCClient.preferredVideoWidth)x\(WebRTCClient.preferredVideoHeight)@\(WebRTCClient.preferredVideoFps))")
+        }
+        isVideoEnabled = true
+        delegate?.webRTCClient(self, didChangeLocalVideoTrack: track)
+    }
+
+    private func startVideoCapture() async {
+        guard let source = videoSource, isVideoEnabled else { return }
+        if cameraCapturer != nil || syntheticCapturer != nil { return }
+
+        let devices = RTCCameraVideoCapturer.captureDevices()
+        guard let device = devices.first(where: { $0.position == cameraPosition }) ?? devices.first else {
+            // The iOS simulator has no camera: feed a generated test pattern so
+            // the video track still negotiates and carries frames.
+            let synthetic = SyntheticVideoCapturer(delegate: source)
+            synthetic.pattern = (cameraPosition == .front) ? .front : .back
+            synthetic.start()
+            syntheticCapturer = synthetic
+            log("No camera available (simulator?); using a synthetic video source")
+            return
+        }
+
+        guard let format = WebRTCClient.bestFormat(for: device) else {
+            log("Camera \(device.localizedName) has no usable formats")
+            return
+        }
+        let fps = WebRTCClient.bestFrameRate(for: format)
+        let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        let capturer = RTCCameraVideoCapturer(delegate: source)
+        cameraCapturer = capturer
+        let error: Error? = await withCheckedContinuation { continuation in
+            capturer.startCapture(with: device, format: format, fps: fps) { error in
+                continuation.resume(returning: error)
+            }
+        }
+        if let error {
+            log("Camera start failed: \(error.localizedDescription)")
+            cameraCapturer = nil
+        } else {
+            log("Camera started: \(device.localizedName) \(dimensions.width)x\(dimensions.height)@\(fps)")
+        }
+    }
+
+    private func stopVideoCapture() async {
+        if let synthetic = syntheticCapturer {
+            synthetic.stop()
+            syntheticCapturer = nil
+        }
+        if let capturer = cameraCapturer {
+            cameraCapturer = nil
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                capturer.stopCapture { continuation.resume() }
+            }
+            log("Camera stopped")
+        }
+    }
+
+    /// The supported format closest to 640x480 whose pixel format WebRTC
+    /// can consume directly.
+    static func bestFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
+        let supportedPixelFormats = RTCCVPixelBuffer.supportedPixelFormats()
+        let targetArea = Int(preferredVideoWidth) * Int(preferredVideoHeight)
+        func score(_ format: AVCaptureDevice.Format) -> Int {
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let areaDelta = abs(Int(dims.width) * Int(dims.height) - targetArea)
+            let pixelFormat = CMFormatDescriptionGetMediaSubType(format.formatDescription)
+            let penalty = supportedPixelFormats.contains(NSNumber(value: pixelFormat)) ? 0 : 10_000_000
+            return areaDelta + penalty
+        }
+        return formats.min { score($0) < score($1) }
+    }
+
+    static func bestFrameRate(for format: AVCaptureDevice.Format) -> Int {
+        let maxSupported = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? Double(preferredVideoFps)
+        return min(preferredVideoFps, Int(maxSupported))
+    }
+
     // MARK: Offer / answer
+
+    /// `OfferToReceiveVideo` stays false until a video transceiver exists, so
+    /// an audio-only call produces exactly the SDP it always did.
+    private func sdpConstraints() -> RTCMediaConstraints {
+        let wantsVideo = peerConnection?.transceivers.contains { $0.mediaType == .video && !$0.isStopped } ?? false
+        return RTCMediaConstraints(
+            mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": wantsVideo ? "true" : "false"],
+            optionalConstraints: nil
+        )
+    }
 
     func createOffer() async throws -> String {
         guard let pc = peerConnection else { throw WebRTCClientError.closed }
-        let sdp = try await pc.offer(for: WebRTCClient.sdpConstraints)
+        let sdp = try await pc.offer(for: sdpConstraints())
         try await pc.setLocalDescription(sdp)
         log("Local offer set")
+        logTransceivers()
         return sdp.sdp
     }
 
     func createAnswer() async throws -> String {
         guard let pc = peerConnection else { throw WebRTCClientError.closed }
-        let sdp = try await pc.answer(for: WebRTCClient.sdpConstraints)
+        let sdp = try await pc.answer(for: sdpConstraints())
         try await pc.setLocalDescription(sdp)
         log("Local answer set")
+        logTransceivers()
+        refreshRemoteVideo()
+        if pc.signalingState == .stable { await resumePendingRenegotiation() }
         return sdp.sdp
     }
 
@@ -176,8 +402,32 @@ final class WebRTCClient {
         try await setRemoteDescription(RTCSessionDescription(type: .offer, sdp: sdp))
     }
 
+    /// Apply a remote offer (initial or renegotiation) and produce the answer.
+    /// Returns nil when the offer collided with our own pending offer and this
+    /// is the impolite peer: the other side rolls back and re-offers.
+    func handleRemoteOffer(_ sdp: String) async throws -> String? {
+        guard let pc = peerConnection else { throw WebRTCClientError.closed }
+        if pc.signalingState != .stable {
+            guard isPolite else {
+                log("Ignoring remote offer while our own offer is pending (glare, impolite peer)")
+                return nil
+            }
+            log("Rolling back our pending offer to take the remote one (glare, polite peer)")
+            try await pc.setLocalDescription(RTCSessionDescription(type: .rollback, sdp: ""))
+            renegotiationPending = true
+        }
+        try await setRemoteOffer(sdp)
+        return try await createAnswer()
+    }
+
     func setRemoteAnswer(_ sdp: String) async throws {
+        guard let pc = peerConnection else { throw WebRTCClientError.closed }
+        guard pc.signalingState == .haveLocalOffer else {
+            log("Ignoring remote answer in signaling state \(pc.signalingState.rawValue) (stale after rollback?)")
+            return
+        }
         try await setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp))
+        await resumePendingRenegotiation()
     }
 
     private func setRemoteDescription(_ description: RTCSessionDescription) async throws {
@@ -185,12 +435,76 @@ final class WebRTCClient {
         try await pc.setRemoteDescription(description)
         remoteDescriptionSet = true
         log("Remote \(RTCSessionDescription.string(for: description.type)) set")
+        logTransceivers()
+        refreshRemoteVideo()
         let queued = pendingRemoteCandidates
         pendingRemoteCandidates.removeAll()
         for candidate in queued {
             await addRemoteCandidateNow(candidate)
         }
         if !queued.isEmpty { log("Applied \(queued.count) queued remote candidate(s)") }
+    }
+
+    // MARK: Renegotiation
+
+    /// Create a new offer for a local media change and hand it to the delegate.
+    /// Deferred while an offer/answer exchange is in flight.
+    private func renegotiate() async {
+        guard let pc = peerConnection else { return }
+        guard pc.signalingState == .stable else {
+            renegotiationPending = true
+            log("Renegotiation deferred (signaling state \(pc.signalingState.rawValue))")
+            return
+        }
+        renegotiationPending = false
+        do {
+            let sdp = try await createOffer()
+            log("Renegotiation offer created")
+            delegate?.webRTCClient(self, didCreateRenegotiationOffer: sdp)
+        } catch {
+            log("Renegotiation offer failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func resumePendingRenegotiation() async {
+        guard renegotiationPending, peerConnection?.signalingState == .stable else { return }
+        log("Resuming deferred renegotiation")
+        await renegotiate()
+    }
+
+    // MARK: Remote video
+
+    /// Publish the remote video track only while the negotiated direction says
+    /// the other party is sending video; a muted/receive-only transceiver
+    /// means its camera is off.
+    fileprivate func refreshRemoteVideo() {
+        guard let pc = peerConnection else { return }
+        var active: RTCVideoTrack?
+        for transceiver in pc.transceivers where transceiver.mediaType == .video && !transceiver.isStopped {
+            var direction = RTCRtpTransceiverDirection.inactive
+            guard transceiver.currentDirection(&direction) else { continue }
+            if direction == .sendRecv || direction == .recvOnly,
+               let track = transceiver.receiver.track as? RTCVideoTrack {
+                active = track
+                break
+            }
+        }
+        // `receiver.track` returns a fresh wrapper object each time, so compare ids.
+        guard active?.trackId != remoteVideoTrack?.trackId else { return }
+        remoteVideoTrack = active
+        log("Remote video \(active == nil ? "stopped" : "active")")
+        delegate?.webRTCClient(self, didChangeRemoteVideoTrack: active)
+    }
+
+    private func logTransceivers() {
+        guard let pc = peerConnection else { return }
+        let parts = pc.transceivers.map { transceiver -> String in
+            let kind = transceiver.mediaType == .video ? "video" : "audio"
+            var current = RTCRtpTransceiverDirection.inactive
+            let negotiated = transceiver.currentDirection(&current) ? current.name : "-"
+            return "\(kind)[mid \(transceiver.mid)] \(transceiver.direction.name)/\(negotiated)"
+        }
+        log("Transceivers (preferred/negotiated): \(parts.joined(separator: ", "))")
     }
 
     // MARK: ICE
@@ -300,6 +614,15 @@ final class WebRTCClient {
         /// Bytes over the selected ICE candidate pair (RTP + RTCP + DTLS).
         var transportBytesSent: Int = 0
         var transportBytesReceived: Int = 0
+        /// Video counters; all zero (and omitted from `description`) on audio-only calls.
+        var videoPacketsSent: Int = 0
+        var videoFramesEncoded: Int = 0
+        var videoPacketsReceived: Int = 0
+        var videoFramesDecoded: Int = 0
+
+        var hasVideoActivity: Bool {
+            videoPacketsSent + videoFramesEncoded + videoPacketsReceived + videoFramesDecoded > 0
+        }
 
         var description: String {
             var parts = [
@@ -308,6 +631,10 @@ final class WebRTCClient {
                 "lost \(packetsLost)",
                 "transport \(transportBytesSent) B out/\(transportBytesReceived) B in"
             ]
+            if hasVideoActivity {
+                parts.append("video sent \(videoPacketsSent) pkts/\(videoFramesEncoded) frames")
+                parts.append("video received \(videoPacketsReceived) pkts/\(videoFramesDecoded) frames")
+            }
             if let rtt = roundTripTimeMs { parts.append(String(format: "rtt %.0f ms", rtt)) }
             return parts.joined(separator: ", ")
         }
@@ -319,14 +646,21 @@ final class WebRTCClient {
         var stats = AudioStats()
         for stat in report.statistics.values {
             let values = stat.values
+            let kind = values["kind"] as? String
             switch stat.type {
-            case "outbound-rtp" where (values["kind"] as? String) == "audio":
+            case "outbound-rtp" where kind == "audio":
                 stats.packetsSent += (values["packetsSent"] as? NSNumber)?.intValue ?? 0
                 stats.bytesSent += (values["bytesSent"] as? NSNumber)?.intValue ?? 0
-            case "inbound-rtp" where (values["kind"] as? String) == "audio":
+            case "inbound-rtp" where kind == "audio":
                 stats.packetsReceived += (values["packetsReceived"] as? NSNumber)?.intValue ?? 0
                 stats.bytesReceived += (values["bytesReceived"] as? NSNumber)?.intValue ?? 0
                 stats.packetsLost += (values["packetsLost"] as? NSNumber)?.intValue ?? 0
+            case "outbound-rtp" where kind == "video":
+                stats.videoPacketsSent += (values["packetsSent"] as? NSNumber)?.intValue ?? 0
+                stats.videoFramesEncoded += (values["framesEncoded"] as? NSNumber)?.intValue ?? 0
+            case "inbound-rtp" where kind == "video":
+                stats.videoPacketsReceived += (values["packetsReceived"] as? NSNumber)?.intValue ?? 0
+                stats.videoFramesDecoded += (values["framesDecoded"] as? NSNumber)?.intValue ?? 0
             case "candidate-pair" where (values["state"] as? String) == "succeeded" && (values["nominated"] as? Bool ?? true):
                 if let rtt = (values["currentRoundTripTime"] as? NSNumber)?.doubleValue {
                     stats.roundTripTimeMs = rtt * 1000
@@ -365,12 +699,24 @@ final class WebRTCClient {
         guard let pc = peerConnection else { return }
         log("Closing peer connection")
         observer?.owner = nil
+        syntheticCapturer?.stop()
+        syntheticCapturer = nil
+        if let capturer = cameraCapturer {
+            cameraCapturer = nil
+            capturer.stopCapture()
+        }
         pc.close()
         peerConnection = nil
         audioTrack = nil
+        localVideoTrack = nil
+        remoteVideoTrack = nil
+        videoSource = nil
+        videoTransceiver = nil
+        isVideoEnabled = false
         observer = nil
         pendingRemoteCandidates.removeAll()
         remoteDescriptionSet = false
+        renegotiationPending = false
     }
 
     // MARK: Events from the observer (main actor)
@@ -427,8 +773,25 @@ private final class PeerConnectionObserver: NSObject, RTCPeerConnectionDelegate,
         print("🎧 [WebRTC] Remote stream removed")
     }
 
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams mediaStreams: [RTCMediaStream]) {
+        let kind = rtpReceiver.track?.kind ?? "unknown"
+        print("🎧 [WebRTC] Remote \(kind) receiver added (\(mediaStreams.count) stream(s))")
+        if kind == kRTCMediaStreamTrackKindVideo { onMain { $0.refreshRemoteVideo() } }
+    }
+
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove rtpReceiver: RTCRtpReceiver) {
+        print("🎧 [WebRTC] Remote \(rtpReceiver.track?.kind ?? "unknown") receiver removed")
+        onMain { $0.refreshRemoteVideo() }
+    }
+
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didStartReceivingOn transceiver: RTCRtpTransceiver) {
+        print("🎧 [WebRTC] Started receiving on \(transceiver.mediaType == .video ? "video" : "audio") transceiver (mid \(transceiver.mid))")
+        onMain { $0.refreshRemoteVideo() }
+    }
+
     nonisolated func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {
-        // Negotiation is driven explicitly by CallManager.
+        // Negotiation is driven explicitly: CallManager for the first exchange,
+        // WebRTCClient.renegotiate() for video changes.
     }
 
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
@@ -483,6 +846,19 @@ extension RTCPeerConnectionState {
         case .disconnected: return "disconnected"
         case .failed: return "failed"
         case .closed: return "closed"
+        @unknown default: return "unknown(\(rawValue))"
+        }
+    }
+}
+
+extension RTCRtpTransceiverDirection {
+    var name: String {
+        switch self {
+        case .sendRecv: return "sendrecv"
+        case .sendOnly: return "sendonly"
+        case .recvOnly: return "recvonly"
+        case .inactive: return "inactive"
+        case .stopped: return "stopped"
         @unknown default: return "unknown(\(rawValue))"
         }
     }
