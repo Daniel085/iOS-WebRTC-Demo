@@ -1,0 +1,43 @@
+# Fly.io configuration for the WebRTC Dialer backend.
+#
+# First deploy (from the backend/ directory):
+#   brew install flyctl && fly auth login
+#   fly launch --no-deploy --copy-config --name webrtc-dialer-backend
+#   fly secrets set JWT_SECRET="$(openssl rand -base64 32)" JWT_REFRESH_SECRET="$(openssl rand -base64 32)"
+#   fly deploy
+#
+# Then point the iOS app (Settings → Server) at https://webrtc-dialer-backend.fly.dev
+# Later: `fly postgres create` + set SKIP_DATABASE=false and DB_* secrets.
+
+app = "webrtc-dialer-backend"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  SKIP_DATABASE = "true"
+  SMS_PROVIDER = "mock"
+  ALLOWED_ORIGINS = "*"
+  LOG_LEVEL = "info"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # Keep one machine warm so Socket.IO connections and in-memory call state survive.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -10,7 +10,6 @@ import Combine
 
 struct KeypadView: View {
     @StateObject private var viewModel = KeypadViewModel()
-    @StateObject private var callCoordinator = CallCoordinator.shared
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -121,12 +120,6 @@ struct KeypadView: View {
                         .font(.headline)
                 }
             }
-            .fullScreenCover(item: $callCoordinator.activeCall) { call in
-                ActiveCallView(call: call)
-            }
-            .fullScreenCover(item: $callCoordinator.incomingCall) { call in
-                IncomingCallView(call: call)
-            }
         }
     }
 }
@@ -183,7 +176,7 @@ class KeypadViewModel: ObservableObject {
     @Published var phoneNumber = ""
     @Published var showActiveCall = false
 
-    private let callCoordinator = CallCoordinator.shared
+    private let callManager = CallManager.shared
 
     func addDigit(_ digit: String) {
         phoneNumber += digit
@@ -197,7 +190,7 @@ class KeypadViewModel: ObservableObject {
 
     func makeCall(isVideo: Bool) {
         guard !phoneNumber.isEmpty else { return }
-        callCoordinator.startCall(to: phoneNumber, hasVideo: isVideo)
+        callManager.startCall(to: phoneNumber, hasVideo: isVideo)
         showActiveCall = true
         // Clear the number after initiating call
         phoneNumber = ""

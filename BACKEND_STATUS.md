@@ -14,7 +14,7 @@ However, this repository now includes:
 - **WebSocket protocol** fully specified
 - **API endpoints** documented with request/response formats
 
-### ✅ What I'm CREATING NOW:
+### ✅ What Now Exists:
 - **Production-ready signaling server** (`backend/signaling-server/`)
 - **REST API server** for authentication (`backend/api-server/`)
 - **Database migrations** and setup scripts
@@ -41,7 +41,7 @@ The backend consists of three main components:
 - `POST /user/voip-token` - Register VoIP push token
 
 ### 2. Signaling Server (WebSocket)
-- **Port**: 3001
+- **Port**: shares port 3000 with the REST API (Socket.IO attached to the same HTTP server; `PORT`/`API_PORT` override)
 - **Purpose**: Real-time call signaling
 - **Stack**: Node.js + Socket.io
 - **Auth**: JWT token validation
@@ -94,6 +94,8 @@ docker-compose up -d
 - **AWS EC2**: Terraform scripts provided
 - **DigitalOcean**: App Platform configuration
 - **Railway**: railway.json provided
+- **Fly.io**: `backend/fly.toml` provided
+- **Render**: `backend/render.yaml` Blueprint provided
 
 ### Option 3: VPS Manual Setup
 Full instructions in `backend/docs/DEPLOYMENT.md`

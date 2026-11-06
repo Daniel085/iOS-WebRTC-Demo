@@ -7,14 +7,15 @@ module.exports = {
   apps: [{
     name: 'webrtc-backend',
     script: './src/index.js',
-    instances: process.env.PM2_INSTANCES || 2,
-    exec_mode: 'cluster',
+    // Signaling keeps connected users / active calls in process memory, so run a
+    // single instance. Scale out only after moving that state to Redis.
+    instances: 1,
+    exec_mode: 'fork',
     watch: false,
     max_memory_restart: '500M',
     env: {
       NODE_ENV: 'production',
-      API_PORT: 3000,
-      SIGNALING_PORT: 3001
+      PORT: 3000
     },
     error_file: './logs/pm2-error.log',
     out_file: './logs/pm2-out.log',

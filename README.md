@@ -113,6 +113,17 @@ For testing VoIP push notifications and real calls:
 # - Build and run
 ```
 
+Or build and install from the command line (`xcrun devicectl list devices` shows the device UDID; the bundle id is `com.D3DigitalProductions.WebRTCDialer` and `DEVELOPMENT_TEAM` is set in the project):
+
+```bash
+xcodebuild -project ios/WebRTCDialer.xcodeproj -scheme WebRTCDialer \
+  -configuration Debug -destination 'id=<DEVICE_UDID>' \
+  -allowProvisioningUpdates build
+
+xcrun devicectl device install app --device <UDID> <path to WebRTCDialer.app>
+xcrun devicectl device process launch --device <UDID> com.D3DigitalProductions.WebRTCDialer
+```
+
 See **[docs/XCODE_SETUP.md](./docs/XCODE_SETUP.md)** for complete device setup.
 
 #### Option 3: With Backend Server (Full Stack)
@@ -150,14 +161,9 @@ EOF
 node mock-server.js
 ```
 
-**2. Update iOS app to use backend:**
-```swift
-// In ios/WebRTCDialer/WebRTCDialer/Utilities/Constants.swift
-enum API {
-    static let baseURL = "http://localhost:3000"
-    static let signalingURL = "ws://localhost:3000"
-}
-```
+**2. Point the iOS app at the backend:**
+
+The server URL is configurable at runtime in the app under **Settings → Server** (text field, Save, and "Test Connection", which calls `GET /health`). The saved value overrides the build default, `defaultBaseURL` in `ios/WebRTCDialer/Utilities/Constants.swift`: `http://localhost:3000` on the simulator, and your Mac's LAN IP (e.g. `http://192.168.4.20:3000`, edit it in `Constants.swift`) on a physical device. The signaling URL is derived from the base URL (http→ws, https→wss, same host and port), since the backend serves REST and Socket.IO on one port.
 
 **3. Run app** (it will now connect to your backend!)
 

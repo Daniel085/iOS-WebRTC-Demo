@@ -13,8 +13,9 @@ struct WebRTCDialerApp: App {
     @StateObject private var appState = AppState()
 
     init() {
-        // Initialize WebRTC on app launch
-        // RTCInitializeSSL() will be called in WebRTCClient when implemented
+        // Initializes the WebRTC factory/SSL, the CallKit provider and PushKit
+        // before any UI so incoming calls can be handled from launch.
+        CallManager.shared.bootstrap()
     }
 
     var body: some Scene {
@@ -31,19 +32,25 @@ struct WebRTCDialerApp: App {
 }
 
 /// App-wide state management
+@MainActor
 class AppState: ObservableObject {
     @Published var isAuthenticated = false
 
     init() {
         // Check if user is authenticated
         isAuthenticated = AuthenticationService.shared.isAuthenticated
+        if isAuthenticated {
+            CallManager.shared.connectSignaling()
+        }
     }
 
     func login() {
         isAuthenticated = true
+        CallManager.shared.connectSignaling()
     }
 
     func logout() {
+        CallManager.shared.disconnectSignaling()
         AuthenticationService.shared.logout()
         isAuthenticated = false
     }

@@ -49,8 +49,11 @@ router.post('/send-code', async (req, res, next) => {
       message: 'Verification code sent successfully'
     };
 
-    // In development mode, include the code in the response
-    if (process.env.NODE_ENV === 'development' && result.code) {
+    // Include the code in the response when no real SMS was sent: either in
+    // development, or whenever the mock SMS provider is in use (which is never
+    // a real delivery channel). Real providers (twilio, aws-sns) never return it.
+    const usingMockSms = (process.env.SMS_PROVIDER || 'mock') === 'mock';
+    if ((process.env.NODE_ENV === 'development' || usingMockSms) && result.code) {
       response.devCode = result.code;
     }
 

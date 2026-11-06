@@ -17,8 +17,17 @@ const connectedUsers = new Map();
 // Store active calls: Map<callId, {caller, callee, status}>
 const activeCalls = new Map();
 
-function createSignalingServer() {
-  const server = http.createServer();
+/**
+ * Create the Socket.IO signaling layer.
+ *
+ * @param {http.Server} [existingServer] - When provided (the default in
+ *   src/index.js), signaling is attached to the same HTTP server as the REST
+ *   API so everything runs on ONE port. This keeps the backend deployable on
+ *   platforms that expose a single port (Fly.io, Render, Railway, Heroku...).
+ *   When omitted, a standalone HTTP server is created (used by `npm run dev:signaling`).
+ */
+function createSignalingServer(existingServer) {
+  const server = existingServer || http.createServer();
 
   const io = new Server(server, {
     cors: {
@@ -63,6 +72,19 @@ function createSignalingServer() {
       logger.info(`User registered: ${socket.phoneNumber}`);
 
       socket.emit('registered', { success: true, phoneNumber: socket.phoneNumber });
+
+      // Deliver any offer / ICE candidates that arrived while this user was
+      // offline (e.g. the callee was woken by a VoIP push after the caller had
+      // already sent its SDP offer).
+      activeCalls.forEach((call, callId) => {
+        const pending = call.pendingSignals;
+        if (!pending || pending.length === 0) return;
+        const mine = pending.filter((signal) => signal.toUserId === socket.userId);
+        if (mine.length === 0) return;
+        mine.forEach((signal) => socket.emit(signal.event, signal.payload));
+        call.pendingSignals = pending.filter((signal) => signal.toUserId !== socket.userId);
+        logger.info(`Delivered ${mine.length} buffered signaling message(s) for call ${callId} to ${socket.phoneNumber}`);
+      });
     });
 
     // Initiate a call
@@ -241,9 +263,28 @@ function createSignalingServer() {
       }
     });
 
+    /**
+     * Resolve the socket of the OTHER participant of a call, based on who is
+     * sending. Using the sender's identity (rather than a client-supplied `to`)
+     * means a client can never make the server echo signaling back to itself
+     * or route it to a third party.
+     */
+    const otherPartyConnection = (call) => {
+      const otherUserId = call.callerId === socket.userId ? call.calleeId : call.callerId;
+      return connectedUsers.get(otherUserId);
+    };
+
+    // Hold a signaling message for the other party until it registers.
+    const bufferForOtherParty = (call, event, payload) => {
+      const toUserId = call.callerId === socket.userId ? call.calleeId : call.callerId;
+      call.pendingSignals = call.pendingSignals || [];
+      call.pendingSignals.push({ toUserId, event, payload });
+      logger.debug(`Buffered ${event} for offline party on call ${payload.callId}`);
+    };
+
     // WebRTC Signaling - ICE Candidates
     socket.on('ice-candidate', (data) => {
-      const { callId, candidate, to } = data;
+      const { callId, candidate } = data;
       const call = activeCalls.get(callId);
 
       if (!call) {
@@ -251,22 +292,22 @@ function createSignalingServer() {
       }
 
       // Forward ICE candidate to the other peer
-      const recipientId = to === call.callerPhone ? call.calleeId : call.callerId;
-      const recipientConnection = connectedUsers.get(recipientId);
+      const recipientConnection = otherPartyConnection(call);
 
+      const payload = { callId, candidate, from: socket.phoneNumber };
       if (recipientConnection) {
-        io.to(recipientConnection.socketId).emit('ice-candidate', {
-          callId,
-          candidate,
-          from: socket.phoneNumber
-        });
+        io.to(recipientConnection.socketId).emit('ice-candidate', payload);
         logger.debug(`ICE candidate forwarded for call ${callId}`);
+      } else {
+        bufferForOtherParty(call, 'ice-candidate', payload);
       }
     });
 
     // WebRTC Signaling - SDP Offer
+    // Normally caller -> callee, but renegotiation (e.g. adding video mid-call)
+    // can originate from either side, so always route to the other party.
     socket.on('offer', (data) => {
-      const { callId, sdp, to } = data;
+      const { callId, sdp } = data;
       const call = activeCalls.get(callId);
 
       if (!call) {
@@ -274,16 +315,13 @@ function createSignalingServer() {
         return;
       }
 
-      // Forward offer to callee
-      const recipientConnection = connectedUsers.get(call.calleeId);
+      const recipientConnection = otherPartyConnection(call);
+      const payload = { callId, sdp, from: socket.phoneNumber, hasVideo: call.hasVideo };
       if (recipientConnection) {
-        io.to(recipientConnection.socketId).emit('offer', {
-          callId,
-          sdp,
-          from: socket.phoneNumber,
-          hasVideo: call.hasVideo
-        });
+        io.to(recipientConnection.socketId).emit('offer', payload);
         logger.debug(`SDP offer forwarded for call ${callId}`);
+      } else {
+        bufferForOtherParty(call, 'offer', payload);
       }
     });
 
@@ -296,8 +334,8 @@ function createSignalingServer() {
         return;
       }
 
-      // Forward answer to caller
-      const callerConnection = connectedUsers.get(call.callerId);
+      // Forward answer to whoever sent the offer (the other party)
+      const callerConnection = otherPartyConnection(call);
       if (callerConnection) {
         io.to(callerConnection.socketId).emit('answer', {
           callId,
@@ -349,8 +387,13 @@ function createSignalingServer() {
   return { server, io };
 }
 
+/**
+ * Start signaling as a standalone server on its own port.
+ * Only used when running `node src/signaling-server.js` / `npm run dev:signaling`.
+ * The normal entry point (src/index.js) attaches signaling to the API server instead.
+ */
 async function startSignalingServer() {
-  const { server, io } = createSignalingServer();
+  const { server } = createSignalingServer();
   const PORT = process.env.SIGNALING_PORT || 3001;
 
   return new Promise((resolve) => {
@@ -361,7 +404,22 @@ async function startSignalingServer() {
   });
 }
 
+/**
+ * Attach signaling to an existing HTTP server (shared with the REST API).
+ * Returns the Socket.IO instance.
+ */
+function attachSignalingServer(httpServer) {
+  const { io } = createSignalingServer(httpServer);
+  return io;
+}
+
+if (require.main === module) {
+  require('dotenv').config();
+  startSignalingServer();
+}
+
 module.exports = startSignalingServer;
 module.exports.createSignalingServer = createSignalingServer;
+module.exports.attachSignalingServer = attachSignalingServer;
 module.exports.connectedUsers = connectedUsers;
 module.exports.activeCalls = activeCalls;

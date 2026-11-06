@@ -18,6 +18,10 @@ const { errorHandler } = require('./middleware/errorHandler');
 function createApiServer() {
   const app = express();
 
+  // Behind a reverse proxy / PaaS load balancer (Fly.io, Render, Nginx...),
+  // trust the first proxy hop so rate limiting and logging see the real client IP.
+  app.set('trust proxy', 1);
+
   // Security middleware
   app.use(helmet());
   app.use(cors({
@@ -25,18 +29,20 @@ function createApiServer() {
     credentials: true
   }));
 
-  // Rate limiting
+  // Rate limiting (per client IP). Configurable so that local testing with
+  // several simulators behind one IP does not trip the limits.
+  const windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || String(15 * 60 * 1000), 10);
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
+    windowMs,
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
     message: 'Too many requests from this IP, please try again later.'
   });
   app.use('/api/', limiter);
 
-  // Stricter rate limit for auth endpoints
+  // Stricter rate limit for auth endpoints (send-code / verify-code)
   const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5, // 5 requests per 15 minutes
+    windowMs,
+    max: parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || '5', 10),
     message: 'Too many authentication attempts, please try again later.'
   });
 
