@@ -76,11 +76,24 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # SIP gateway (docs/SIP_INTEGRATION.md). The gateway reaches Asterisk over
+      # the compose network on the plain WebSocket port; phones use wss://:8089.
+      SIP_ENABLED: ${SIP_ENABLED:-false}
+      ASTERISK_WSS_URL: ${ASTERISK_WSS_URL:-ws://asterisk:8088/ws}
+      ASTERISK_DOMAIN: ${ASTERISK_DOMAIN:-asterisk}
+      SIP_GATEWAY_SECRET: ${SIP_GATEWAY_SECRET}
+      ASTERISK_AMI_HOST: ${ASTERISK_AMI_HOST:-asterisk}
+      ASTERISK_AMI_PORT: 5038
+      ASTERISK_AMI_USER: ${ASTERISK_AMI_USER:-gateway}
+      ASTERISK_AMI_SECRET: ${ASTERISK_AMI_SECRET:-change-me-gateway-ami}
+      ASTERISK_USERS_CONF: /app/asterisk/etc/pjsip_users.conf
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:
       - ./logs:/app/logs
       - ./certs:/app/certs:ro
+      # Shared with the asterisk service: provisioning writes pjsip_users.conf here.
+      - ./asterisk/etc:/app/asterisk/etc
     networks:
       - webrtc-network
     healthcheck:
@@ -89,6 +102,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # Asterisk: WebRTC <-> SIP media gateway (docs/SIP_INTEGRATION.md, Phase 1-2).
+  # Config lives in ./asterisk/etc, TLS certs in ./asterisk/certs (see ./asterisk/README.md).
+  #   docker compose up asterisk
+  #   docker compose exec asterisk asterisk -rx "pjsip show endpoints"
+  asterisk:
+    image: andrius/asterisk:22
+    container_name: webrtc-asterisk
+    restart: unless-stopped
+    # Linux hosts can use host networking instead of the port list below, which
+    # avoids NAT for RTP entirely:  network_mode: host  (and drop "ports").
+    ports:
+      - "8088:8088"                      # SIP over WebSocket (plain) - gateway/dev only
+      - "8089:8089"                      # SIP over secure WebSocket - browsers, phones
+      - "127.0.0.1:5038:5038"            # AMI (pjsip reload) - local backend only
+      - "10000-10100:10000-10100/udp"    # RTP (matches rtp.conf)
+    volumes:
+      - ./asterisk/etc:/etc/asterisk:ro
+      - ./asterisk/certs:/etc/asterisk/keys:ro
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show version' | grep -q Asterisk"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - webrtc-network
 
   # Nginx Reverse Proxy (optional)
   nginx:

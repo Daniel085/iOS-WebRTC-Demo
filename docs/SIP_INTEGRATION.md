@@ -269,6 +269,48 @@ Rough effort: Phase 0 is the largest (it is the core of the app). Phases 1–2
 are mostly configuration and a ~400-line Node module. Phases 3–4 are mostly
 provider setup plus push wiring that `voip-push.js` already anticipates.
 
+## Implementation status (Phases 1–2, November 2026)
+
+Phases 1 and 2 are implemented on the backend; see
+[`backend/asterisk/README.md`](../backend/asterisk/README.md) for the runbook.
+
+| Piece | Where | State |
+|-------|-------|-------|
+| Asterisk container | `backend/docker-compose.yml` (`asterisk` service, `andrius/asterisk:22`), config in `backend/asterisk/etc/` | Written; not started here (no Docker on the dev Mac) |
+| PJSIP WSS transport, `app-user` template, `webrtc_test` demo user | `backend/asterisk/etc/pjsip.conf`, `http.conf`, `rtp.conf`, `modules.conf` | Written |
+| Echo / playback / ringing test extensions | `backend/asterisk/etc/extensions.conf` (`*43`, `*44`, `*45`, `*46`) | Written |
+| Node SIP gateway (one JsSIP UA per app user, SIP ↔ Socket.IO mapping) | `backend/src/services/sip-gateway.js` + `sip/` | Done, unit-tested and tested against a fake SIP-over-WS server with the real JsSIP stack |
+| Routing rule in `call-initiate` | `backend/src/signaling-server.js` | Done; `npm run smoke` still passes |
+| Endpoint provisioning at verify-code (`pjsip_users.conf` + AMI `pjsip reload`) | `backend/src/services/sip-provisioning.js`, `routes/auth.js` | Done (realtime Postgres remains the production path) |
+| Integration script against Asterisk | `npm run sip:integration` (`backend/test/sip-echo.integration.js`) | Passes against the fake server; needs a Docker host for the real thing |
+
+Design notes that changed while implementing:
+
+* **JsSIP under Node** needs an `RTCPeerConnection`. The gateway installs a
+  pass-through implementation (`sip/passthrough-peer-connection.js`) whose
+  "offer" is the app's SDP and whose ICE gathering is always complete; JsSIP
+  therefore puts the app's SDP into the INVITE / 200 OK unchanged. `ws` provides
+  the WebSocket (`sip/node-websocket.js`) so a self-signed Asterisk cert can be
+  accepted (`ASTERISK_TLS_INSECURE=true`).
+* **Routing predicate**: besides E.164 and `sip:` URIs, Asterisk feature codes
+  (`*NN`, e.g. `*43`) are SIP destinations so the echo test can be dialled from
+  the app. E.164 numbers reach Asterisk already; without a trunk the dialplan
+  answers `503` → `call-error {sipStatus: 503}`.
+* **ICE**: the gateway buffers `ice-candidate` events after the `offer` and sends
+  the INVITE on end-of-candidates (`candidate: null`/`""`), when the offer already
+  contains `a=end-of-candidates`, or after `SIP_ICE_GATHER_TIMEOUT_MS` (2 s).
+  The same applies to the app's `answer` on inbound calls.
+* **Credentials** are derived, not stored: `user_<digits>` /
+  `HMAC-SHA256(SIP_GATEWAY_SECRET, username)`, so provisioning and the gateway
+  agree even after an in-memory restart.
+* **Registration**: option (1) above — the user's UA registers when its socket
+  `register`s and is stopped on disconnect; an inbound INVITE while the app is
+  offline falls back to VoIP push with the signaling buffered, as app↔app does.
+* **New app-facing event** `call-ringing {callId, sipStatus}`; `call-error`
+  gains `sipStatus`/`reason`; `incoming-call` gains `via: 'sip'`. Everything
+  else is the existing event set. Early media: only the first remote SDP is
+  forwarded as `answer`.
+
 ## Plan B: managed CPaaS instead of Asterisk
 
 If hosting Asterisk is unwanted, Telnyx WebRTC or Twilio Programmable Voice give
