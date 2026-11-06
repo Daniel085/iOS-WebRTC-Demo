@@ -72,6 +72,19 @@ function createSignalingServer(existingServer) {
       logger.info(`User registered: ${socket.phoneNumber}`);
 
       socket.emit('registered', { success: true, phoneNumber: socket.phoneNumber });
+
+      // Deliver any offer / ICE candidates that arrived while this user was
+      // offline (e.g. the callee was woken by a VoIP push after the caller had
+      // already sent its SDP offer).
+      activeCalls.forEach((call, callId) => {
+        const pending = call.pendingSignals;
+        if (!pending || pending.length === 0) return;
+        const mine = pending.filter((signal) => signal.toUserId === socket.userId);
+        if (mine.length === 0) return;
+        mine.forEach((signal) => socket.emit(signal.event, signal.payload));
+        call.pendingSignals = pending.filter((signal) => signal.toUserId !== socket.userId);
+        logger.info(`Delivered ${mine.length} buffered signaling message(s) for call ${callId} to ${socket.phoneNumber}`);
+      });
     });
 
     // Initiate a call
@@ -261,6 +274,14 @@ function createSignalingServer(existingServer) {
       return connectedUsers.get(otherUserId);
     };
 
+    // Hold a signaling message for the other party until it registers.
+    const bufferForOtherParty = (call, event, payload) => {
+      const toUserId = call.callerId === socket.userId ? call.calleeId : call.callerId;
+      call.pendingSignals = call.pendingSignals || [];
+      call.pendingSignals.push({ toUserId, event, payload });
+      logger.debug(`Buffered ${event} for offline party on call ${payload.callId}`);
+    };
+
     // WebRTC Signaling - ICE Candidates
     socket.on('ice-candidate', (data) => {
       const { callId, candidate } = data;
@@ -273,13 +294,12 @@ function createSignalingServer(existingServer) {
       // Forward ICE candidate to the other peer
       const recipientConnection = otherPartyConnection(call);
 
+      const payload = { callId, candidate, from: socket.phoneNumber };
       if (recipientConnection) {
-        io.to(recipientConnection.socketId).emit('ice-candidate', {
-          callId,
-          candidate,
-          from: socket.phoneNumber
-        });
+        io.to(recipientConnection.socketId).emit('ice-candidate', payload);
         logger.debug(`ICE candidate forwarded for call ${callId}`);
+      } else {
+        bufferForOtherParty(call, 'ice-candidate', payload);
       }
     });
 
@@ -296,14 +316,12 @@ function createSignalingServer(existingServer) {
       }
 
       const recipientConnection = otherPartyConnection(call);
+      const payload = { callId, sdp, from: socket.phoneNumber, hasVideo: call.hasVideo };
       if (recipientConnection) {
-        io.to(recipientConnection.socketId).emit('offer', {
-          callId,
-          sdp,
-          from: socket.phoneNumber,
-          hasVideo: call.hasVideo
-        });
+        io.to(recipientConnection.socketId).emit('offer', payload);
         logger.debug(`SDP offer forwarded for call ${callId}`);
+      } else {
+        bufferForOtherParty(call, 'offer', payload);
       }
     });
 
