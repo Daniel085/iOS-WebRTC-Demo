@@ -16,7 +16,7 @@ This backend provides:
 ### Prerequisites
 
 - Node.js 18+ and npm
-- PostgreSQL 14+
+- PostgreSQL 14+ (only when `SKIP_DATABASE=false`; see [Setup Database](#3-setup-database-optional---skip-for-quick-start))
 - (Optional) Redis for production caching
 
 ### 1. Install Dependencies
@@ -35,7 +35,7 @@ Edit `.env` with your configuration:
 
 ```bash
 # Quick Start Mode (No Database Required)
-# TODO: For production, set SKIP_DATABASE=false and configure PostgreSQL
+# Set SKIP_DATABASE=false to persist users, tokens and calls in PostgreSQL
 SKIP_DATABASE=true
 
 # JWT Secrets (generate with: openssl rand -base64 32)
@@ -51,19 +51,79 @@ SMS_PROVIDER=mock
 # TWILIO_VERIFY_SERVICE_SID=VAxxxxxx
 ```
 
-**Note:** With `SKIP_DATABASE=true`, user data will NOT persist between restarts. This is for quick testing only.
+**Note:** With `SKIP_DATABASE=true` the Sequelize models are replaced by in-memory mocks, so users, refresh tokens, VoIP push tokens and call records are lost on every restart and every iOS client has to sign in again. This is for quick testing only.
 
 ### 3. Setup Database (Optional - Skip for Quick Start)
 
-If you want persistent data, install PostgreSQL and run:
+With `SKIP_DATABASE=false` the backend stores users, refresh tokens, VoIP push tokens and call history in PostgreSQL, so they survive backend restarts. Docker is not required; the steps below use a local Postgres from Homebrew on macOS. The database name, user and password match the `DB_*` defaults in `.env.example`.
+
+**One-time setup (macOS, Homebrew):**
 
 ```bash
-# Set SKIP_DATABASE=false in .env first
-# Then create database
-npm run db:create
+# Install and start PostgreSQL 16 (starts again at login)
+brew install postgresql@16
+brew services start postgresql@16
 
-# Run migrations
-npm run db:migrate
+# postgresql@16 is keg-only; put psql on your PATH for this shell
+export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+
+# Create the role and database used by the DB_* defaults
+psql -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER PASSWORD 'postgres';"
+psql -d postgres -c "CREATE DATABASE webrtc_dialer OWNER postgres;"
+
+# Check it works
+psql -h localhost -U postgres -d webrtc_dialer -c "select 1;"
+```
+
+Homebrew's Postgres creates a superuser named after your macOS account, which is why the first two `psql` commands connect without `-U`. The password only matters if you tighten `pg_hba.conf`; the default local setup trusts connections from this machine. On Linux, create the same role and database with `sudo -u postgres psql` instead (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)). If you already have a Postgres with a `postgres` role, `npm run db:create` creates just the database.
+
+**Switch the backend to PostgreSQL:**
+
+```bash
+# In .env
+SKIP_DATABASE=false
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=webrtc_dialer
+DB_USER=postgres
+DB_PASSWORD=postgres
+```
+
+Then start the backend as usual (`npm run dev`). In development (`NODE_ENV` other than `production`) the startup runs `sequelize.sync()`, which creates any missing tables and indexes on first start, so no migration step is needed locally. The models use the same snake_case columns as `src/database/migrations`, so a database created by `npm run db:migrate` (production) is identical to one created by `sync()`; running the migrations against a synced database is harmless.
+
+The log should show:
+
+```
+✓ Database connection established successfully
+✓ Database models synchronized
+```
+
+If Postgres is not reachable the backend logs the host, port, database and user it tried and exits; start Postgres or set `SKIP_DATABASE=true`.
+
+**Switching between modes:** change `SKIP_DATABASE` in `.env` and restart the backend. The two modes do not share data: going from `true` to `false` starts from whatever is in Postgres (clients signed in during in-memory mode must sign in again once), and going back to `true` leaves the Postgres data untouched for the next time.
+
+**Verify persistence:**
+
+```bash
+# Sign in (mock SMS returns the code as devCode in development)
+curl -s -X POST http://localhost:3000/api/auth/send-code -H 'Content-Type: application/json' -d '{"phoneNumber":"+12015550101"}'
+curl -s -X POST http://localhost:3000/api/auth/verify-code -H 'Content-Type: application/json' -d '{"phoneNumber":"+12015550101","code":"<devCode>"}'
+
+# Register a VoIP token with the returned JWT
+curl -s -X POST http://localhost:3000/api/user/voip-token -H "Authorization: Bearer <token>" -H 'Content-Type: application/json' -d '{"token":"<64 hex chars>","deviceId":"my-iphone"}'
+
+# Restart the backend, then the same JWT still works and the token is still stored
+curl -s http://localhost:3000/api/user/profile -H "Authorization: Bearer <token>"
+psql -h localhost -U postgres -d webrtc_dialer -c "select user_id, left(token, 12), is_active from voip_tokens;"
+```
+
+**Useful Postgres commands:**
+
+```bash
+brew services stop postgresql@16          # stop the server
+brew services restart postgresql@16       # restart it
+psql -h localhost -U postgres -d webrtc_dialer -c '\dt'                 # list tables
+psql -h localhost -U postgres -d webrtc_dialer -c 'truncate calls, voip_tokens, refresh_tokens, users;'  # wipe all data
 ```
 
 ### 4. Start Development Server
@@ -435,8 +495,10 @@ npm run lint:fix
 
 ### Database Commands
 
+These need a running PostgreSQL and `SKIP_DATABASE=false` (see [Setup Database](#3-setup-database-optional---skip-for-quick-start)). Locally the tables are created by `sequelize.sync()` on startup; the migrations are for production deployments where `sync()` does not run.
+
 ```bash
-# Create database
+# Create database (the DB_USER role must already exist)
 npm run db:create
 
 # Run migrations
@@ -625,13 +687,21 @@ LOG_LEVEL=debug  # debug, info, warn, error
 
 ### Database Connection Failed
 
+The startup log names the host, port, database and user it tried. Then:
+
 ```bash
-# Check PostgreSQL is running
+# macOS (Homebrew): check PostgreSQL is running
+brew services info postgresql@16
+# Linux
 sudo systemctl status postgresql
 
-# Test connection
+# Test connection with the same settings as .env
 psql -h localhost -U postgres -d webrtc_dialer
 ```
+
+- `role "postgres" does not exist` or `database "webrtc_dialer" does not exist`: run the one-time setup in [Setup Database](#3-setup-database-optional---skip-for-quick-start).
+- `psql: command not found` on macOS: `export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"`.
+- To run without a database for a quick test, set `SKIP_DATABASE=true` (nothing persists).
 
 ### Port Already in Use
 

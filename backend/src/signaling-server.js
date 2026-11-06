@@ -103,9 +103,11 @@ function createSignalingServer() {
           });
           logger.info(`Call notification sent via WebSocket to ${to}`);
         } else {
-          // User offline - send VoIP push notification
+          // User offline - send VoIP push notification to the most recently
+          // registered token that has not been unregistered (DELETE /api/user/voip-token
+          // only deactivates rows, it does not delete them).
           const voipToken = await db.VoipToken.findOne({
-            where: { userId: recipient.id },
+            where: { userId: recipient.id, isActive: true },
             order: [['createdAt', 'DESC']]
           });
 

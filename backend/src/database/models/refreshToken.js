@@ -1,6 +1,8 @@
 /**
  * RefreshToken Model
  * Stores refresh tokens for JWT authentication
+ *
+ * Column names are snake_case (`underscored: true`) to match the migrations.
  */
 
 module.exports = (sequelize, DataTypes) => {
@@ -16,7 +18,9 @@ module.exports = (sequelize, DataTypes) => {
       references: {
         model: 'users',
         key: 'id'
-      }
+      },
+      onUpdate: 'CASCADE',
+      onDelete: 'CASCADE'
     },
     token: {
       type: DataTypes.TEXT,
@@ -41,19 +45,20 @@ module.exports = (sequelize, DataTypes) => {
   }, {
     tableName: 'refresh_tokens',
     timestamps: true,
+    underscored: true,
     indexes: [
       {
-        fields: ['userId']
+        fields: ['user_id']
       },
       {
         unique: true,
         fields: ['token']
       },
       {
-        fields: ['isRevoked']
+        fields: ['is_revoked']
       },
       {
-        fields: ['expiresAt']
+        fields: ['expires_at']
       }
     ]
   });
