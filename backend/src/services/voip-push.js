@@ -18,13 +18,18 @@ function initializeApnProvider() {
 
   const apnOptions = {
     token: process.env.APN_AUTH_METHOD === 'token' ? {
-      key: process.env.APN_KEY_PATH,
+      // APN_KEY holds the .p8 contents (for PaaS hosts without a key file); APN_KEY_PATH is a file path.
+      key: process.env.APN_KEY || process.env.APN_KEY_PATH,
       keyId: process.env.APN_KEY_ID,
       teamId: process.env.APN_TEAM_ID
     } : null,
     cert: process.env.APN_AUTH_METHOD === 'cert' ? process.env.APN_CERT_PATH : null,
     key: process.env.APN_AUTH_METHOD === 'cert' ? process.env.APN_KEY_PATH : null,
-    production: process.env.NODE_ENV === 'production'
+    // APN_PRODUCTION overrides the gateway choice: Xcode development builds need the sandbox
+    // gateway even when the backend runs with NODE_ENV=production.
+    production: process.env.APN_PRODUCTION !== undefined
+      ? process.env.APN_PRODUCTION === 'true'
+      : process.env.NODE_ENV === 'production'
   };
 
   // Remove null values
@@ -54,7 +59,7 @@ function initializeApnProvider() {
 async function sendVoIPPush(deviceToken, payload) {
   try {
     // In development mode without APNs configured, log instead of sending
-    if (!process.env.APN_KEY_PATH && !process.env.APN_CERT_PATH) {
+    if (!process.env.APN_KEY && !process.env.APN_KEY_PATH && !process.env.APN_CERT_PATH) {
       logger.info('[MOCK VoIP Push] Would send push notification:', {
         token: deviceToken.substring(0, 10) + '...',
         payload

@@ -17,13 +17,13 @@ enum Constants {
     enum API {
         /// Default used when no override has been saved in Settings.
         /// - Simulator: the backend running on this Mac.
-        /// - Device: the Mac's LAN address (edit for your network) until a
-        ///   hosted backend URL is configured.
+        /// - Device: the hosted backend on Fly.io. Use Settings → Server to point a
+        ///   build at the Mac's LAN address (e.g. http://192.168.4.20:3000) instead.
         static var defaultBaseURL: String {
             #if targetEnvironment(simulator)
             return "http://localhost:3000"
             #else
-            return "http://192.168.4.20:3000"
+            return "https://webrtc-dialer-backend.fly.dev"
             #endif
         }
 

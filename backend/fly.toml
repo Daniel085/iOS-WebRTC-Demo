@@ -4,6 +4,7 @@
 #   brew install flyctl && fly auth login
 #   fly launch --no-deploy --copy-config --name webrtc-dialer-backend
 #   fly secrets set JWT_SECRET="$(openssl rand -base64 32)" JWT_REFRESH_SECRET="$(openssl rand -base64 32)"
+#   fly secrets set APN_AUTH_METHOD=token APN_KEY_ID=<key id> APN_TEAM_ID=<team id> APN_KEY="$(cat certs/AuthKey_<key id>.p8)"
 #   fly deploy
 #
 # Then point the iOS app (Settings → Server) at https://webrtc-dialer-backend.fly.dev
@@ -22,6 +23,9 @@ primary_region = "sjc"
   SMS_PROVIDER = "mock"
   ALLOWED_ORIGINS = "*"
   LOG_LEVEL = "info"
+  # Xcode development builds register sandbox APNs tokens; flip to "true" for TestFlight/App Store builds.
+  APN_PRODUCTION = "false"
+  VOIP_BUNDLE_ID = "com.D3DigitalProductions.WebRTCDialer.voip"
 
 [http_service]
   internal_port = 3000

@@ -395,12 +395,16 @@ The repo includes `backend/fly.toml` (steps are also in the comments at the top 
 cd backend
 brew install flyctl
 fly auth login
-fly launch --no-deploy --copy-config
+fly launch --no-deploy --copy-config --name webrtc-dialer-backend
 fly secrets set JWT_SECRET=$(openssl rand -base64 32) JWT_REFRESH_SECRET=$(openssl rand -base64 32)
-fly deploy
+# VoIP push: the .p8 key goes in as a secret (no key file in the image)
+fly secrets set APN_AUTH_METHOD=token APN_KEY_ID=<key id> APN_TEAM_ID=<team id> APN_KEY="$(cat certs/AuthKey_<key id>.p8)"
+fly deploy --ha=false
 ```
 
-Verify with `curl https://<app>.fly.dev/health`, then set `https://<app>.fly.dev` in the iOS app under Settings → Server. Keep a single instance: signaling state (connected users, active calls) lives in process memory.
+Verify with `curl https://<app>.fly.dev/health`, then set `https://<app>.fly.dev` in the iOS app under Settings → Server. Keep a single instance: signaling state (connected users, active calls) lives in process memory. `fly.toml` sets `APN_PRODUCTION=false` because Xcode development builds register sandbox APNs tokens; set it to `true` for TestFlight/App Store builds.
+
+The backend is deployed as `webrtc-dialer-backend` (https://webrtc-dialer-backend.fly.dev); device builds use it as their default server.
 
 ### Render
 
