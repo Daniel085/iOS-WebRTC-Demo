@@ -44,7 +44,7 @@ function assert(cond, msg) { if (!cond) throw new Error('assertion failed: ' + m
   const [A, B] = await Promise.all([connect(tA), connect(tB)]);
   console.log('✓ users authenticated and connected');
 
-  const callId = 'tx-smoke-' + Date.now();
+  const callId = require('crypto').randomUUID(); // call IDs must be UUIDs
   const segment = (id, text, isFinal = true) => ({ callId, segment: { id, text, isFinal, startedAt: Date.now() } });
 
   // Set up an answered call.

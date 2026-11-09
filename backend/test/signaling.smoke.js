@@ -31,7 +31,7 @@ const once = (s, ev) => new Promise(r => s.once(ev, r));
   const [A, B] = await Promise.all([connect(tA), connect(tB)]);
   console.log('✓ both sockets connected + registered on', BASE);
 
-  const callId = 'smoke-' + Date.now();
+  const callId = require('crypto').randomUUID(); // call IDs must be UUIDs
   const incoming = once(B, 'incoming-call');
   A.emit('call-initiate', { to: '+15550000002', callId, hasVideo: false });
   const inc = await incoming;
@@ -56,7 +56,28 @@ const once = (s, ev) => new Promise(r => s.once(ev, r));
   A.emit('call-end', { callId });
   await endedAtB; console.log('✓ B got call-ended');
 
-  A.close(); B.close();
+  // A malformed call ID is refused before the call exists...
+  const badIdError = once(A, 'call-error');
+  A.emit('call-initiate', { to: '+15550000002', callId: 'not-a-uuid', hasVideo: false });
+  const err = await badIdError;
+  if (!/Invalid call ID/.test(err.error)) throw new Error('expected "Invalid call ID", got ' + JSON.stringify(err));
+  console.log('✓ non-UUID call ID rejected:', err.error);
+
+  // ...and a caller that drops mid-call must end the call without taking the server down.
+  const droppedCallId = require('crypto').randomUUID();
+  const incoming2 = once(B, 'incoming-call');
+  A.emit('call-initiate', { to: '+15550000002', callId: droppedCallId, hasVideo: false });
+  await incoming2;
+  const endedByDrop = once(B, 'call-ended');
+  A.close();
+  const ended = await endedByDrop;
+  if (ended.reason !== 'disconnection') throw new Error('expected reason "disconnection", got ' + JSON.stringify(ended));
+  await new Promise(r => setTimeout(r, 500));
+  const health = await fetch(BASE + '/health');
+  if (!health.ok) throw new Error('server unhealthy after a caller disconnect: ' + health.status);
+  console.log('✓ caller disconnect ended the call and the server is still healthy');
+
+  B.close();
   console.log('ALL SIGNALING SMOKE TESTS PASSED');
   process.exit(0);
 })().catch(e => { console.error('SMOKE FAILED:', e.message || e); process.exit(1); });

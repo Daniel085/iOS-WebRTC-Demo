@@ -17,6 +17,11 @@ const connectedUsers = new Map();
 // Store active calls: Map<callId, {caller, callee, status}>
 const activeCalls = new Map();
 
+// Call IDs are stored in a UUID column; anything else would make every
+// database write for the call fail, so it is rejected before the call exists.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidCallId = (callId) => typeof callId === 'string' && UUID_PATTERN.test(callId);
+
 // Calls where both people agreed to transcription. Kept for a day after the
 // call so either participant can ask for a summary (POST /api/calls/:id/summary).
 // Only participants and phone numbers are kept, never transcript text.
@@ -126,6 +131,12 @@ function createSignalingServer(existingServer) {
     socket.on('call-initiate', async (data) => {
       try {
         const { to, callId, hasVideo } = data;
+
+        if (!isValidCallId(callId)) {
+          socket.emit('call-error', { callId, error: 'Invalid call ID (must be a UUID)' });
+          return;
+        }
+
         logger.info(`Call initiated: ${socket.phoneNumber} -> ${to} (${callId})`);
 
         // Find recipient
@@ -287,14 +298,14 @@ function createSignalingServer(existingServer) {
           });
         }
 
+        activeCalls.delete(callId);
+        logger.info(`Call ended: ${callId}`);
+
         // Update database
         await db.Call.update(
           { status: 'ended', endedAt: new Date() },
           { where: { id: callId } }
         );
-
-        activeCalls.delete(callId);
-        logger.info(`Call ended: ${callId}`);
       } catch (error) {
         logger.error('Error ending call:', error);
       }
@@ -484,7 +495,7 @@ function createSignalingServer(existingServer) {
       connectedUsers.delete(socket.userId);
 
       // End any active calls for this user
-      activeCalls.forEach(async (call, callId) => {
+      activeCalls.forEach((call, callId) => {
         if (call.callerId === socket.userId || call.calleeId === socket.userId) {
           // Notify the other party
           const otherUserId = call.callerId === socket.userId ? call.calleeId : call.callerId;
@@ -497,13 +508,18 @@ function createSignalingServer(existingServer) {
             });
           }
 
-          // Update database
-          await db.Call.update(
-            { status: 'disconnected', endedAt: new Date() },
-            { where: { id: callId } }
-          );
-
           activeCalls.delete(callId);
+
+          // Update database. Never let a failed write escape: an unhandled
+          // rejection here would take the whole server down.
+          Promise.resolve()
+            .then(() => db.Call.update(
+              { status: 'disconnected', endedAt: new Date() },
+              { where: { id: callId } }
+            ))
+            .catch((error) => {
+              logger.error(`Failed to mark call ${callId} disconnected: ${error.message}`);
+            });
         }
       });
     });
