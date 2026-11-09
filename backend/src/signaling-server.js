@@ -22,6 +22,28 @@ const activeCalls = new Map();
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isValidCallId = (callId) => typeof callId === 'string' && UUID_PATTERN.test(callId);
 
+// Database writes for one call run strictly in the order they were requested.
+// Each handler awaits its own write, but handlers for the same call overlap:
+// an answer, reject or hang-up that arrives within a few milliseconds of
+// call-initiate would otherwise send its UPDATE on another pooled connection
+// before the INSERT has committed, match no row, and leave the call recorded
+// as "initiated" forever. The returned promise still rejects with that write's
+// own error; a failed write does not block the ones queued behind it.
+const callRecordWrites = new Map(); // callId -> tail of that call's write chain
+
+function writeCallRecord(callId, write) {
+  const previous = callRecordWrites.get(callId) || Promise.resolve();
+  const result = previous.then(write);
+  const tail = result.catch(() => {});
+  callRecordWrites.set(callId, tail);
+  tail.then(() => {
+    if (callRecordWrites.get(callId) === tail) {
+      callRecordWrites.delete(callId);
+    }
+  });
+  return result;
+}
+
 // Calls where both people agreed to transcription. Kept for a day after the
 // call so either participant can ask for a summary (POST /api/calls/:id/summary).
 // Only participants and phone numbers are kept, never transcript text.
@@ -193,14 +215,14 @@ function createSignalingServer(existingServer) {
         }
 
         // Save call to database
-        await db.Call.create({
+        await writeCallRecord(callId, () => db.Call.create({
           id: callId,
           callerId: socket.userId,
           calleeId: recipient.id,
           type: hasVideo ? 'video' : 'audio',
           status: 'initiated',
           startedAt: new Date()
-        });
+        }));
 
       } catch (error) {
         logger.error('Error initiating call:', error);
@@ -232,10 +254,10 @@ function createSignalingServer(existingServer) {
         }
 
         // Update call in database
-        await db.Call.update(
+        await writeCallRecord(callId, () => db.Call.update(
           { status: 'answered', answeredAt: new Date() },
           { where: { id: callId } }
-        );
+        ));
 
         logger.info(`Call answered: ${callId}`);
       } catch (error) {
@@ -264,14 +286,16 @@ function createSignalingServer(existingServer) {
           });
         }
 
-        // Update database
-        await db.Call.update(
-          { status: 'rejected', endedAt: new Date() },
-          { where: { id: callId } }
-        );
-
+        // Forget the call before writing, as call-end does, so a failed write
+        // cannot leave it registered.
         activeCalls.delete(callId);
         logger.info(`Call rejected: ${callId}`);
+
+        // Update database
+        await writeCallRecord(callId, () => db.Call.update(
+          { status: 'rejected', endedAt: new Date() },
+          { where: { id: callId } }
+        ));
       } catch (error) {
         logger.error('Error rejecting call:', error);
       }
@@ -302,10 +326,10 @@ function createSignalingServer(existingServer) {
         logger.info(`Call ended: ${callId}`);
 
         // Update database
-        await db.Call.update(
+        await writeCallRecord(callId, () => db.Call.update(
           { status: 'ended', endedAt: new Date() },
           { where: { id: callId } }
-        );
+        ));
       } catch (error) {
         logger.error('Error ending call:', error);
       }
@@ -513,10 +537,10 @@ function createSignalingServer(existingServer) {
           // Update database. Never let a failed write escape: an unhandled
           // rejection here would take the whole server down.
           Promise.resolve()
-            .then(() => db.Call.update(
+            .then(() => writeCallRecord(callId, () => db.Call.update(
               { status: 'disconnected', endedAt: new Date() },
               { where: { id: callId } }
-            ))
+            )))
             .catch((error) => {
               logger.error(`Failed to mark call ${callId} disconnected: ${error.message}`);
             });
