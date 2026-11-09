@@ -1,6 +1,11 @@
 /**
  * VoipToken Model
  * Stores VoIP push notification tokens for users
+ *
+ * Column names are snake_case (`underscored: true`) to match the migrations.
+ * `token` is unique across all users: an APNs VoIP token identifies a device,
+ * so when another account signs in on the same device the row is reassigned
+ * (see routes/user.js) rather than duplicated.
  */
 
 module.exports = (sequelize, DataTypes) => {
@@ -16,7 +21,9 @@ module.exports = (sequelize, DataTypes) => {
       references: {
         model: 'users',
         key: 'id'
-      }
+      },
+      onUpdate: 'CASCADE',
+      onDelete: 'CASCADE'
     },
     token: {
       type: DataTypes.TEXT,
@@ -41,16 +48,17 @@ module.exports = (sequelize, DataTypes) => {
   }, {
     tableName: 'voip_tokens',
     timestamps: true,
+    underscored: true,
     indexes: [
       {
-        fields: ['userId']
+        fields: ['user_id']
       },
       {
         unique: true,
         fields: ['token']
       },
       {
-        fields: ['isActive']
+        fields: ['is_active']
       }
     ]
   });

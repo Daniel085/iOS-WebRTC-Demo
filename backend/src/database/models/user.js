@@ -1,6 +1,10 @@
 /**
  * User Model
  * Represents a user in the system
+ *
+ * Column names are snake_case (`underscored: true`) so that a database created
+ * by `sequelize.sync()` is identical to one created by the migrations in
+ * ../migrations. Index `fields` must therefore use the column names.
  */
 
 module.exports = (sequelize, DataTypes) => {
@@ -45,13 +49,14 @@ module.exports = (sequelize, DataTypes) => {
   }, {
     tableName: 'users',
     timestamps: true,
+    underscored: true,
     indexes: [
       {
         unique: true,
-        fields: ['phoneNumber']
+        fields: ['phone_number']
       },
       {
-        fields: ['isActive']
+        fields: ['is_active']
       }
     ]
   });

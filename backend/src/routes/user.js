@@ -107,18 +107,20 @@ router.post('/voip-token', async (req, res, next) => {
 
     const { token, deviceId } = value;
 
-    // Check if token already exists
+    // An APNs VoIP token identifies a device, and voip_tokens.token is unique.
+    // Look the token up on its own so that re-registering it (same user, or a
+    // different account signing in on the same phone) updates the existing row
+    // instead of violating the unique index.
     let voipToken = await db.VoipToken.findOne({
-      where: {
-        userId: req.userId,
-        token
-      }
+      where: { token }
     });
 
     if (voipToken) {
-      // Update existing token
+      // Update existing token (reassigns it if another user now owns the device)
       await voipToken.update({
+        userId: req.userId,
         deviceId,
+        isActive: true,
         updatedAt: new Date()
       });
       logger.info(`VoIP token updated for user ${req.userId}`);

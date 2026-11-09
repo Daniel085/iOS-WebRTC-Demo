@@ -17,7 +17,9 @@ const { attachSignalingServer } = require('./signaling-server');
 // Import database
 const db = require('./database/models');
 
-// Running without PostgreSQL keeps users/calls in memory (lost on restart).
+// SKIP_DATABASE=true swaps the Sequelize models for in-memory mocks (nothing
+// survives a restart). SKIP_DATABASE=false uses PostgreSQL via the DB_* variables;
+// see README.md "Setup Database" for the local Postgres instructions.
 const SKIP_DATABASE = process.env.SKIP_DATABASE === 'true';
 
 // PaaS platforms inject PORT; API_PORT is kept for backwards compatibility.
@@ -26,10 +28,20 @@ const PORT = parseInt(process.env.PORT || process.env.API_PORT || '3000', 10);
 async function startServers() {
   try {
     if (!SKIP_DATABASE) {
-      await db.sequelize.authenticate();
+      try {
+        await db.sequelize.authenticate();
+      } catch (error) {
+        const { host, port, database, username } = db.sequelize.config;
+        const reason = error.message || (error.parent && error.parent.code) || error.name;
+        logger.error(`✗ Could not connect to PostgreSQL at ${host}:${port}/${database} as ${username}: ${reason}`);
+        logger.error('  Start Postgres and create the database (see backend/README.md "Setup Database"), or set SKIP_DATABASE=true for in-memory mode.');
+        throw error;
+      }
       logger.info('✓ Database connection established successfully');
 
-      // Sync database models (use migrations in production)
+      // Create any missing tables/indexes. The models use the same snake_case
+      // columns as src/database/migrations, so sync() and `npm run db:migrate`
+      // produce the same schema. In production run the migrations instead.
       if (process.env.NODE_ENV !== 'production') {
         await db.sequelize.sync({ alter: false });
         logger.info('✓ Database models synchronized');
