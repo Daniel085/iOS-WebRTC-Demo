@@ -68,6 +68,12 @@ class Call: Identifiable, ObservableObject {
     /// Whether the in-call UI should use the video layout.
     var showsVideo: Bool { isVideoEnabled || remoteVideoTrack != nil }
 
+    /// When the call was placed or started ringing
+    let createdAt = Date()
+
+    /// Consent, captions and transcript for this call.
+    lazy var transcription = CallTranscription(callId: signalingCallId, isOutgoing: isOutgoing)
+
     /// When the call connected
     var connectedAt: Date?
 
@@ -182,6 +188,7 @@ final class CallManager: ObservableObject {
 
     private let callKit = CallKitManager.shared
     private let push = VoIPPushService.shared
+    private let history = CallHistoryStore.shared
 
     private var webRTC: WebRTCClient?
 
@@ -250,6 +257,7 @@ final class CallManager: ObservableObject {
 
         let number = normalizeDialedNumber(phoneNumber)
         let call = Call(phoneNumber: number, isIncoming: false, hasVideo: hasVideo, state: .connecting)
+        call.transcription.signaling = signaling
         calls[call.id] = call
         activeCall = call
         log("Starting call \(call.signalingCallId) to \(number)")
@@ -318,7 +326,7 @@ final class CallManager: ObservableObject {
             guard !Task.isCancelled, let self, self.activeCall?.id == call.id, call.state == .ringing else { return }
             self.log("No answer after \(Int(self.ringTimeout)) s")
             self.signaling.endCall(callId: call.signalingCallId)
-            self.finish(call, state: .ended, detail: "No answer", callKitReason: .unanswered)
+            self.finish(call, state: .ended, detail: "No answer", callKitReason: .unanswered, outcome: .noAnswer)
         }
     }
 
@@ -341,6 +349,7 @@ final class CallManager: ObservableObject {
             hasVideo: hasVideo,
             state: .ringing
         )
+        call.transcription.signaling = signaling
         calls[call.id] = call
         incomingCall = call
         log("Incoming call \(callId) from \(from)")
@@ -456,6 +465,8 @@ final class CallManager: ObservableObject {
         if call.isIncoming, !answeredCalls.contains(uuid) {
             log("Declining \(call.signalingCallId)")
             signaling.rejectCall(callId: call.signalingCallId, reason: "declined")
+            finish(call, state: .ended, detail: nil, callKitReason: nil, clearImmediately: true, outcome: .declined)
+            return true
         } else {
             log("Ending \(call.signalingCallId)")
             signaling.endCall(callId: call.signalingCallId)
@@ -466,7 +477,7 @@ final class CallManager: ObservableObject {
 
     /// Central teardown. `callKitReason == nil` means CallKit already knows
     /// (the end came through a CXEndCallAction) so nothing is reported.
-    private func finish(_ call: Call, state: CallState, detail: String?, callKitReason: CXCallEndedReason?, clearImmediately: Bool = false) {
+    private func finish(_ call: Call, state: CallState, detail: String?, callKitReason: CXCallEndedReason?, clearImmediately: Bool = false, outcome: CallRecord.Outcome? = nil) {
         guard !call.isFinished else { return }
         ringTimeoutTask?.cancel()
         ringTimeoutTask = nil
@@ -480,13 +491,17 @@ final class CallManager: ObservableObject {
         call.remoteVideoTrack = nil
         pendingOffers.removeValue(forKey: call.signalingCallId)
         pendingCandidates.removeValue(forKey: call.signalingCallId)
+        calls.removeValue(forKey: call.id)
+
+        let wasAnswered = answeredCalls.contains(call.id)
         startedCalls.remove(call.id)
         answeredCalls.remove(call.id)
-        calls.removeValue(forKey: call.id)
 
         call.statusDetail = detail
         if state == .failed { call.fail() } else { call.end() }
         log("Call \(call.signalingCallId) \(state == .failed ? "failed" : "ended")\(detail.map { ": \($0)" } ?? "")")
+
+        recordHistory(for: call, outcome: outcome ?? defaultOutcome(for: call, state: state, wasAnswered: wasAnswered))
 
         if clearImmediately {
             clear(call)
@@ -496,6 +511,39 @@ final class CallManager: ObservableObject {
                 try? await Task.sleep(for: .seconds(1.5))
                 self?.clear(call)
             }
+        }
+    }
+
+    private func defaultOutcome(for call: Call, state: CallState, wasAnswered: Bool) -> CallRecord.Outcome {
+        if call.connectedAt != nil { return .completed }
+        if state == .failed || wasAnswered { return .failed }
+        return call.isIncoming ? .missed : .noAnswer
+    }
+
+    /// Add the call to Recents. If it was transcribed, the transcript is added
+    /// once the local transcriber has flushed, and a summary is requested.
+    private func recordHistory(for call: Call, outcome: CallRecord.Outcome) {
+        history.add(CallRecord(
+            id: call.id,
+            callId: call.signalingCallId,
+            phoneNumber: call.phoneNumber,
+            isOutgoing: call.isOutgoing,
+            isVideo: call.hasVideo,
+            startedAt: call.createdAt,
+            duration: call.duration,
+            outcome: outcome,
+            transcript: [],
+            summary: nil,
+            summaryStatus: .none
+        ))
+
+        let transcription = call.transcription
+        guard transcription.wasEverActive || !transcription.lines.isEmpty else { return }
+        Task { [history] in
+            let lines = await transcription.finish()
+            guard !lines.isEmpty else { return }
+            history.update(id: call.id) { $0.transcript = lines }
+            if transcription.wasEverActive { history.requestSummary(id: call.id) }
         }
     }
 
@@ -531,6 +579,7 @@ final class CallManager: ObservableObject {
         guard let call = findCall(uuid: uuid) else { return false }
         call.isMuted = muted
         webRTC?.isMuted = muted || call.isOnHold
+        call.transcription.setMicrophoneMuted(muted || call.isOnHold)
         return true
     }
 
@@ -557,6 +606,7 @@ final class CallManager: ObservableObject {
         guard let call = findCall(uuid: uuid) else { return false }
         call.isOnHold = onHold
         webRTC?.isMuted = onHold || call.isMuted
+        call.transcription.setMicrophoneMuted(onHold || call.isMuted)
         return true
     }
 
@@ -746,7 +796,7 @@ extension CallManager: SignalingClientDelegate {
     func signalingClient(_ client: SignalingClient, callWasRejected callId: String, reason: String?) {
         guard let call = findCall(signalingId: callId) else { return }
         let detail = (reason == "busy") ? "Busy" : "Declined"
-        finish(call, state: .ended, detail: detail, callKitReason: .remoteEnded)
+        finish(call, state: .ended, detail: detail, callKitReason: .remoteEnded, outcome: .declined)
     }
 
     func signalingClient(_ client: SignalingClient, callDidEnd callId: String, reason: String?) {
@@ -759,6 +809,16 @@ extension CallManager: SignalingClientDelegate {
         let call = callId.flatMap { findCall(signalingId: $0) } ?? presentedCall
         guard let call else { return }
         finish(call, state: .failed, detail: message, callKitReason: .failed)
+    }
+
+    func signalingClient(_ client: SignalingClient, transcriptionStateChanged state: String, callId: String, byYou: Bool) {
+        guard let call = findCall(signalingId: callId), !call.isFinished else { return }
+        call.transcription.handleServerState(state, byYou: byYou)
+    }
+
+    func signalingClient(_ client: SignalingClient, didReceiveTranscriptSegment segment: SignalingTranscriptSegment, callId: String) {
+        guard let call = findCall(signalingId: callId), !call.isFinished else { return }
+        call.transcription.handleRemoteSegment(id: segment.id, text: segment.text, isFinal: segment.isFinal, startedAt: segment.startedAt)
     }
 }
 

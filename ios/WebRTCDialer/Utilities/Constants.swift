@@ -74,6 +74,12 @@ enum Constants {
         static let serverBaseURL = "serverBaseURL"
         /// Simulator only: start WebRTC's audio unit (off by default, see WebRTCClient.initialize).
         static let simulatorAudioEnabled = "simulatorAudioEnabled"
+        /// Use WebRTC's built-in audio unit instead of EngineAudioDevice
+        /// (disables transcription). Read at launch.
+        static let useBuiltInWebRTCAudio = "useBuiltInWebRTCAudio"
+        /// Simulator/testing: feed synthesized speech to the transcriber instead
+        /// of the microphone (the simulator normally runs with audio off).
+        static let transcriptionDemoAudio = "transcriptionDemoAudio"
     }
 
     /// VoIP Configuration
