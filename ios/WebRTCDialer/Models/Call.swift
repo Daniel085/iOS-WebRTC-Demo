@@ -53,8 +53,20 @@ class Call: Identifiable, ObservableObject {
     /// Whether call is on hold
     @Published var isOnHold: Bool = false
 
-    /// Whether video is currently enabled
+    /// Whether the local camera is on (sending video)
     @Published var isVideoEnabled: Bool
+
+    /// Local camera track for the self-view; nil while the camera is off.
+    @Published var localVideoTrack: RTCVideoTrack?
+
+    /// Remote video track; nil while the other party is not sending video.
+    @Published var remoteVideoTrack: RTCVideoTrack?
+
+    /// Which camera the self-view shows (front is mirrored).
+    @Published var isFrontCamera: Bool = true
+
+    /// Whether the in-call UI should use the video layout.
+    var showsVideo: Bool { isVideoEnabled || remoteVideoTrack != nil }
 
     /// When the call connected
     var connectedAt: Date?
@@ -250,6 +262,7 @@ final class CallManager: ObservableObject {
         Task { [weak self] in
             let granted = await AVAudioApplication.requestRecordPermission()
             if !granted { self?.log("Microphone permission denied; the call will carry silence") }
+            if hasVideo { await CallManager.requestCameraPermission() }
             guard let self, self.activeCall?.id == call.id else { return }
             guard self.useCallKit else {
                 _ = self.performStartCall(uuid: call.id)
@@ -275,7 +288,7 @@ final class CallManager: ObservableObject {
         startedCalls.insert(uuid)
 
         prepareAudioSession()
-        guard let client = makeWebRTCClient(hasVideo: call.hasVideo) else {
+        guard let client = makeWebRTCClient(hasVideo: call.hasVideo, isPolite: false) else {
             finish(call, state: .failed, detail: "WebRTC unavailable", callKitReason: nil)
             return false
         }
@@ -353,6 +366,7 @@ final class CallManager: ObservableObject {
         call.state = .connecting
         Task { [weak self] in
             _ = await AVAudioApplication.requestRecordPermission()
+            if call.hasVideo { await CallManager.requestCameraPermission() }
             guard let self, !call.isFinished else { return }
             guard self.useCallKit else {
                 _ = self.performAnswerCall(uuid: call.id)
@@ -379,7 +393,7 @@ final class CallManager: ObservableObject {
         call.state = .connecting
 
         prepareAudioSession()
-        guard let client = makeWebRTCClient(hasVideo: call.hasVideo) else {
+        guard let client = makeWebRTCClient(hasVideo: call.hasVideo, isPolite: true) else {
             finish(call, state: .failed, detail: "WebRTC unavailable", callKitReason: nil)
             return false
         }
@@ -397,13 +411,14 @@ final class CallManager: ObservableObject {
         return true
     }
 
+    /// Apply a remote offer and reply. Used for the first exchange and for
+    /// renegotiation (the other party turned video on/off mid-call).
     private func answer(offer sdp: String, for call: Call) {
         guard let client = webRTC else { return }
         Task { [weak self] in
             do {
-                try await client.setRemoteOffer(sdp)
-                let answer = try await client.createAnswer()
-                guard let self, self.activeCall?.id == call.id else { return }
+                guard let answer = try await client.handleRemoteOffer(sdp) else { return } // glare: ignored
+                guard let self, self.activeCall?.id == call.id, self.webRTC === client else { return }
                 self.signaling.sendAnswer(callId: call.signalingCallId, sdp: answer)
             } catch {
                 self?.finish(call, state: .failed, detail: "Answer failed: \(error.localizedDescription)", callKitReason: .failed)
@@ -461,6 +476,8 @@ final class CallManager: ObservableObject {
         }
 
         teardownMedia()
+        call.localVideoTrack = nil
+        call.remoteVideoTrack = nil
         pendingOffers.removeValue(forKey: call.signalingCallId)
         pendingCandidates.removeValue(forKey: call.signalingCallId)
         startedCalls.remove(call.id)
@@ -543,10 +560,44 @@ final class CallManager: ObservableObject {
         return true
     }
 
+    /// Turn the camera on or off. Works on any call: an audio call becomes a
+    /// video call through renegotiation.
     func toggleVideo() {
-        guard let call = activeCall, call.hasVideo else { return }
-        call.isVideoEnabled.toggle()
-        log("Video toggled to \(call.isVideoEnabled) (video tracks not implemented yet)")
+        guard let call = activeCall, !call.isFinished, let client = webRTC else { return }
+        let enable = !call.isVideoEnabled
+        log("Video \(enable ? "on" : "off") requested for \(call.signalingCallId)")
+        Task { [weak self] in
+            if enable {
+                let granted = await CallManager.requestCameraPermission()
+                guard granted else { self?.log("Camera permission denied"); return }
+            }
+            guard let self, self.webRTC === client, !call.isFinished else { return }
+            do {
+                try await client.setVideoEnabled(enable)
+                call.isVideoEnabled = enable
+                if enable { call.hasVideo = true }
+                if self.useCallKit { self.callKit.reportCallUpdated(uuid: call.id, hasVideo: call.hasVideo) }
+            } catch {
+                self.log("Video toggle failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Switch between the front and back camera.
+    func flipCamera() {
+        guard let call = activeCall, call.isVideoEnabled, let client = webRTC else { return }
+        client.switchCamera()
+        call.isFrontCamera = (client.cameraPosition == .front)
+    }
+
+    /// Camera access. The simulator has no camera (a synthetic source is used)
+    /// so no prompt is shown there.
+    static func requestCameraPermission() async -> Bool {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return await AVCaptureDevice.requestAccess(for: .video)
+        #endif
     }
 
     func sendDTMF(_ digits: String) {
@@ -580,12 +631,14 @@ final class CallManager: ObservableObject {
 
     // MARK: Helpers
 
-    private func makeWebRTCClient(hasVideo: Bool) -> WebRTCClient? {
+    private func makeWebRTCClient(hasVideo: Bool, isPolite: Bool) -> WebRTCClient? {
         webRTC?.close()
         do {
-            let client = try WebRTCClient(hasVideo: hasVideo)
-            client.delegate = self
+            let client = try WebRTCClient(hasVideo: hasVideo, isPolite: isPolite)
+            // Store first: delegate callbacks (the local video track of a
+            // video call arrives immediately) are ignored unless client === webRTC.
             webRTC = client
+            client.delegate = self
             return client
         } catch {
             log("Failed to create WebRTC client: \(error.localizedDescription)")
@@ -650,11 +703,14 @@ extension CallManager: SignalingClientDelegate {
     }
 
     func signalingClient(_ client: SignalingClient, didReceiveOffer sdp: String, callId: String, from: String?) {
-        if let call = findCall(signalingId: callId), call.isIncoming, answeredCalls.contains(call.id), webRTC != nil {
-            answer(offer: sdp, for: call)          // user accepted before the offer arrived
-        } else {
+        guard let call = findCall(signalingId: callId), webRTC != nil,
+              answeredCalls.contains(call.id) || startedCalls.contains(call.id) else {
             pendingOffers[callId] = sdp            // ringing; answered later
+            return
         }
+        // Either the first offer after the user accepted, or a renegotiation
+        // (video turned on/off by the other party) on an established call.
+        answer(offer: sdp, for: call)
     }
 
     func signalingClient(_ client: SignalingClient, didReceiveAnswer sdp: String, callId: String, from: String?) {
@@ -739,6 +795,23 @@ extension CallManager: WebRTCClientDelegate {
     func webRTCClient(_ client: WebRTCClient, didChangePeerConnectionState state: RTCPeerConnectionState) {
         guard let call = activeCall, client === webRTC, state == .failed else { return }
         finish(call, state: .failed, detail: "Peer connection failed", callKitReason: .failed)
+    }
+
+    func webRTCClient(_ client: WebRTCClient, didCreateRenegotiationOffer sdp: String) {
+        guard let call = activeCall, client === webRTC, !call.isFinished else { return }
+        log("Sending renegotiation offer for \(call.signalingCallId)")
+        signaling.sendOffer(callId: call.signalingCallId, sdp: sdp)
+    }
+
+    func webRTCClient(_ client: WebRTCClient, didChangeLocalVideoTrack track: RTCVideoTrack?) {
+        guard let call = activeCall, client === webRTC else { return }
+        call.localVideoTrack = track
+    }
+
+    func webRTCClient(_ client: WebRTCClient, didChangeRemoteVideoTrack track: RTCVideoTrack?) {
+        guard let call = activeCall, client === webRTC else { return }
+        call.remoteVideoTrack = track
+        log("Remote video \(track == nil ? "off" : "on") for \(call.signalingCallId)")
     }
 }
 

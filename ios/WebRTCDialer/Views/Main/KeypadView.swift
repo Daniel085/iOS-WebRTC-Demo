@@ -80,9 +80,17 @@ struct KeypadView: View {
 
                     // Bottom action area
                     HStack(spacing: 80) {
-                        // Left spacer for symmetry
-                        Color.clear
-                            .frame(width: 65, height: 65)
+                        // Video call (left)
+                        Button(action: {
+                            viewModel.makeCall(isVideo: true)
+                        }) {
+                            Image(systemName: "video.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(viewModel.phoneNumber.isEmpty ? .clear : .primary)
+                                .frame(width: 65, height: 65)
+                        }
+                        .disabled(viewModel.phoneNumber.isEmpty)
+                        .accessibilityLabel("Video call")
 
                         // Call button (centered)
                         Button(action: {
