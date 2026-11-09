@@ -30,9 +30,6 @@ struct ActiveCallView: View {
             VStack(spacing: 0) {
                 if viewModel.showsVideo {
                     videoHeader
-                    TranscriptionStatusView(transcription: viewModel.transcription)
-                        .environment(\.colorScheme, .dark)
-                        .padding(.top, 8)
                 } else {
                     Spacer()
                         .frame(height: viewModel.showCaptions ? 16 : 80)
@@ -45,9 +42,12 @@ struct ActiveCallView: View {
                     Spacer(minLength: 0)
                     CaptionsPanel(transcription: viewModel.transcription)
                         .frame(height: 140)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 16))
                         .environment(\.colorScheme, .dark)
-                        .padding(.horizontal, 16)
+                        .padding(.leading, 16)
+                        // Leave the self-view uncovered when the camera is on.
+                        .padding(.trailing, viewModel.localVideoTrack == nil
+                                 ? 16 : Self.selfViewTrailing + Self.selfViewWidth + 10)
                         .padding(.vertical, 12)
                 } else if viewModel.showCaptions {
                     CaptionsPanel(transcription: viewModel.transcription)
@@ -218,6 +218,9 @@ struct ActiveCallView: View {
 
     // MARK: Video layout
 
+    private static let selfViewWidth: CGFloat = 110
+    private static let selfViewTrailing: CGFloat = 16
+
     /// Remote video full screen (or a dark placeholder while the other party's
     /// camera is off) with the local preview floating bottom-right.
     private var videoLayer: some View {
@@ -233,21 +236,26 @@ struct ActiveCallView: View {
                         .font(.system(size: 36))
                     Text("\(viewModel.displayName)'s camera is off")
                         .font(.subheadline)
+                        .multilineTextAlignment(.center)
                 }
                 .foregroundColor(.white.opacity(0.7))
+                .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity)
-                .padding(.top, 220)
+                // Stay clear of the self-view on the right and of captions below.
+                .padding(.trailing, viewModel.localVideoTrack == nil
+                         ? 0 : Self.selfViewTrailing + Self.selfViewWidth)
+                .padding(.top, 180)
             }
 
             // Self view, below the name/status header and clear of the controls.
             if let local = viewModel.localVideoTrack {
                 VideoView(track: local, contentMode: .scaleAspectFill, mirrored: viewModel.isFrontCamera)
-                    .frame(width: 110, height: 160)
+                    .frame(width: Self.selfViewWidth, height: 160)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.6), lineWidth: 1))
                     .shadow(radius: 6)
-                    .padding(.trailing, 16)
-                    .padding(.top, 150)
+                    .padding(.trailing, Self.selfViewTrailing)
+                    .padding(.top, 185)
                     .accessibilityLabel("Local video preview")
             }
         }
@@ -260,11 +268,14 @@ struct ActiveCallView: View {
             Text(viewModel.callStatusText)
                 .font(.system(size: 15))
                 .opacity(0.8)
+            // Inside the dark header so it stays readable over any video.
+            TranscriptionStatusView(transcription: viewModel.transcription)
+                .environment(\.colorScheme, .dark)
         }
         .foregroundColor(.white)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
         .padding(.top, 60)
     }
 }
