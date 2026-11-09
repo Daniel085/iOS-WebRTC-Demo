@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const Joi = require('joi');
 
@@ -117,14 +118,17 @@ router.post('/verify-code', async (req, res, next) => {
       { expiresIn: '30d' }
     );
 
-    // Generate refresh token
+    // Generate refresh token. The random jwtid makes every token distinct:
+    // without it two sign-ins by the same user within one second produce the
+    // same JWT (identical payload and iat) and the second insert violates the
+    // unique index on refresh_tokens.token, failing the sign-in with a 409.
     const refreshToken = jwt.sign(
       {
         userId: user.id,
         type: 'refresh'
       },
       process.env.JWT_REFRESH_SECRET,
-      { expiresIn: '90d' }
+      { expiresIn: '90d', jwtid: crypto.randomUUID() }
     );
 
     // Save refresh token
