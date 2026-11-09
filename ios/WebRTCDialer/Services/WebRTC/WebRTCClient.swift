@@ -38,10 +38,25 @@ final class WebRTCClient {
 
     // MARK: Process-wide setup
 
+    /// Whether calls use `EngineAudioDevice` (the app owns the audio I/O and
+    /// can tap the microphone for transcription) instead of WebRTC's built-in
+    /// audio unit. Fixed at launch; `useBuiltInWebRTCAudio` is an escape hatch.
+    static let usesEngineAudioDevice: Bool =
+        !UserDefaults.standard.bool(forKey: Constants.UserDefaults.useBuiltInWebRTCAudio)
+
     /// Shared factory. Creating it initializes the WebRTC threads once.
     private static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
         RTCSetMinDebugLogLevel(.warning)
+        if usesEngineAudioDevice {
+            print("🎧 [WebRTC] Using the AVAudioEngine audio device")
+            return RTCPeerConnectionFactory(
+                encoderFactory: RTCDefaultVideoEncoderFactory(),
+                decoderFactory: RTCDefaultVideoDecoderFactory(),
+                audioDevice: EngineAudioDevice.shared
+            )
+        }
+        print("🎧 [WebRTC] Using WebRTC's built-in audio unit (transcription unavailable)")
         return RTCPeerConnectionFactory(
             encoderFactory: RTCDefaultVideoEncoderFactory(),
             decoderFactory: RTCDefaultVideoDecoderFactory()
@@ -246,6 +261,7 @@ final class WebRTCClient {
         } catch {
             print("🎧 [WebRTC] setActive(\(active)) failed: \(error.localizedDescription)")
         }
+        if usesEngineAudioDevice { EngineAudioDevice.shared.setAudioSessionActive(active) }
     }
 
     /// Hand CallKit's audio session activation to WebRTC (device only).
@@ -253,9 +269,11 @@ final class WebRTCClient {
         let session = RTCAudioSession.sharedInstance()
         session.audioSessionDidActivate(avSession)
         session.isAudioEnabled = true
+        if usesEngineAudioDevice { EngineAudioDevice.shared.setAudioSessionActive(true) }
     }
 
     static func audioSessionDidDeactivate(_ avSession: AVAudioSession) {
+        if usesEngineAudioDevice { EngineAudioDevice.shared.setAudioSessionActive(false) }
         let session = RTCAudioSession.sharedInstance()
         session.isAudioEnabled = false
         session.audioSessionDidDeactivate(avSession)

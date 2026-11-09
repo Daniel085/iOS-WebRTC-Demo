@@ -9,6 +9,8 @@
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The microphone is used for your voice during calls.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>When both people on a call agree, your side of the call is transcribed on this iPhone for live captions and a summary.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera is used for video calls.</string>
 	<key>UIBackgroundModes</key>

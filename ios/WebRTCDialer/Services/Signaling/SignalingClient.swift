@@ -62,6 +62,25 @@ struct SignalingIceCandidate {
     }
 }
 
+/// One caption segment from the other party (`transcript-segment`).
+struct SignalingTranscriptSegment {
+    let id: String
+    let text: String
+    let isFinal: Bool
+    let startedAt: Date
+
+    init?(json: Any?) {
+        guard let dict = json as? [String: Any],
+              let id = dict["id"] as? String,
+              let text = dict["text"] as? String else { return nil }
+        self.id = id
+        self.text = text
+        self.isFinal = dict["isFinal"] as? Bool ?? false
+        let millis = (dict["startedAt"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970 * 1000
+        self.startedAt = Date(timeIntervalSince1970: millis / 1000)
+    }
+}
+
 // MARK: - Delegate
 
 /// All callbacks are delivered on the main actor, in the order the server sent them.
@@ -76,6 +95,10 @@ protocol SignalingClientDelegate: AnyObject {
     func signalingClient(_ client: SignalingClient, callWasRejected callId: String, reason: String?)
     func signalingClient(_ client: SignalingClient, callDidEnd callId: String, reason: String?)
     func signalingClient(_ client: SignalingClient, didReceiveCallError message: String, callId: String?)
+    /// Transcription consent changed: "requested", "active", "declined" or "stopped".
+    /// `byYou` is true when this user's action caused the change.
+    func signalingClient(_ client: SignalingClient, transcriptionStateChanged state: String, callId: String, byYou: Bool)
+    func signalingClient(_ client: SignalingClient, didReceiveTranscriptSegment segment: SignalingTranscriptSegment, callId: String)
 }
 
 // MARK: - Client
@@ -207,12 +230,38 @@ final class SignalingClient: ObservableObject {
         emit("call-end", ["callId": callId])
     }
 
+    // Transcription (see CallTranscription for the consent flow).
+
+    func requestTranscription(callId: String) {
+        emit("transcription-request", ["callId": callId])
+    }
+
+    func respondToTranscription(callId: String, accepted: Bool) {
+        emit("transcription-respond", ["callId": callId, "accepted": accepted])
+    }
+
+    func stopTranscription(callId: String) {
+        emit("transcription-stop", ["callId": callId])
+    }
+
+    func sendTranscriptSegment(callId: String, id: String, text: String, isFinal: Bool, startedAt: Date) {
+        emit("transcript-segment", [
+            "callId": callId,
+            "segment": [
+                "id": id,
+                "text": text,
+                "isFinal": isFinal,
+                "startedAt": Int((startedAt.timeIntervalSince1970 * 1000).rounded())
+            ] as [String: Any]
+        ])
+    }
+
     private func emit(_ event: String, _ payload: [String: Any]) {
         guard let socket, socket.status == .connected else {
             log("Dropping '\(event)': socket not connected (\(socket?.status.description ?? "nil"))")
             return
         }
-        if event != "ice-candidate" { log("→ \(event) \(summary(of: payload))") }
+        if event != "ice-candidate", event != "transcript-segment" { log("→ \(event) \(summary(of: payload))") }
         socket.emit(event, payload)
     }
 
@@ -311,6 +360,22 @@ final class SignalingClient: ObservableObject {
                   let callId = dict["callId"] as? String else { return }
             self.log("← call-ended \(callId) reason=\(dict["reason"] ?? "")")
             self.delegate?.signalingClient(self, callDidEnd: callId, reason: dict["reason"] as? String)
+        }
+
+        socket.on("transcription-state") { [weak self] data, _ in
+            guard let self, let dict = data.first as? [String: Any],
+                  let callId = dict["callId"] as? String,
+                  let state = dict["state"] as? String else { return }
+            let byYou = dict["byYou"] as? Bool ?? false
+            self.log("← transcription-state \(callId) \(state) byYou=\(byYou)")
+            self.delegate?.signalingClient(self, transcriptionStateChanged: state, callId: callId, byYou: byYou)
+        }
+
+        socket.on("transcript-segment") { [weak self] data, _ in
+            guard let self, let dict = data.first as? [String: Any],
+                  let callId = dict["callId"] as? String,
+                  let segment = SignalingTranscriptSegment(json: dict["segment"]) else { return }
+            self.delegate?.signalingClient(self, didReceiveTranscriptSegment: segment, callId: callId)
         }
 
         socket.on("call-error") { [weak self] data, _ in

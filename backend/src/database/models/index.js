@@ -24,7 +24,8 @@ if (process.env.SKIP_DATABASE === 'true') {
       },
       create: async (data) => {
         const user = {
-          id: `mock-${Date.now()}`,
+          // Unique even when two users sign up in the same millisecond.
+          id: `mock-${Date.now()}-${mockUsers.size}-${Math.random().toString(36).slice(2, 8)}`,
           phoneNumber: data.phoneNumber,
           displayName: data.displayName || null,
           isActive: data.isActive !== false,

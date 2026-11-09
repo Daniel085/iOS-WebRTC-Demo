@@ -13,6 +13,7 @@ const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
+const callRoutes = require('./routes/calls');
 const { errorHandler } = require('./middleware/errorHandler');
 
 function createApiServer() {
@@ -46,7 +47,9 @@ function createApiServer() {
     message: 'Too many authentication attempts, please try again later.'
   });
 
-  // Body parsing middleware
+  // Body parsing middleware. Call transcripts sent for summarizing can exceed
+  // the default 100 kB limit, so that route gets a larger one.
+  app.use('/api/calls', express.json({ limit: '2mb' }));
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(compression());
@@ -69,6 +72,7 @@ function createApiServer() {
   // API routes
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/user', userRoutes);
+  app.use('/api/calls', callRoutes);
 
   // 404 handler
   app.use((req, res) => {

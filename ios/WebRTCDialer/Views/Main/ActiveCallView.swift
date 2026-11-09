@@ -24,11 +24,12 @@ struct ActiveCallView: View {
 
             VStack(spacing: 0) {
                 Spacer()
-                    .frame(height: 80)
+                    .frame(height: viewModel.showCaptions ? 16 : 80)
 
                 // Caller info section
                 VStack(spacing: 12) {
-                    // Profile image placeholder
+                    // Profile image placeholder (hidden to make room for captions)
+                    if !viewModel.showCaptions {
                     ZStack {
                         Circle()
                             .fill(
@@ -45,10 +46,11 @@ struct ActiveCallView: View {
                             .foregroundColor(.white)
                     }
                     .padding(.bottom, 20)
+                    }
 
                     // Caller name/number
                     Text(viewModel.displayName)
-                        .font(.system(size: 34, weight: .light))
+                        .font(.system(size: viewModel.showCaptions ? 26 : 34, weight: .light))
                         .foregroundColor(.primary)
 
                     // Call status
@@ -56,10 +58,18 @@ struct ActiveCallView: View {
                         .font(.system(size: 17))
                         .foregroundColor(.secondary)
                         .padding(.top, 4)
-                }
-                .padding(.top, 40)
 
-                Spacer()
+                    TranscriptionStatusView(transcription: viewModel.transcription)
+                }
+                .padding(.top, viewModel.showCaptions ? 8 : 40)
+
+                if viewModel.showCaptions {
+                    CaptionsPanel(transcription: viewModel.transcription)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 16)
+                } else {
+                    Spacer()
+                }
 
                 // Call control buttons
                 VStack(spacing: 24) {
@@ -87,14 +97,16 @@ struct ActiveCallView: View {
                         )
                     }
 
-                    // Second row: add call, video, contacts
+                    // Second row: transcribe, video, contacts
                     HStack(spacing: 60) {
                         CallControlButton(
-                            icon: "plus",
-                            label: "add call",
-                            isActive: false,
-                            action: { viewModel.addCall() }
+                            icon: viewModel.transcribeIcon,
+                            label: viewModel.transcribeLabel,
+                            isActive: viewModel.isTranscribeButtonActive,
+                            action: { viewModel.toggleTranscription() }
                         )
+                        .disabled(!viewModel.canTranscribe)
+                        .opacity(viewModel.canTranscribe ? 1 : 0.4)
 
                         CallControlButton(
                             icon: viewModel.isVideoEnabled ? "video.fill" : "video.slash.fill",
@@ -112,7 +124,7 @@ struct ActiveCallView: View {
                     }
                 }
                 .padding(.horizontal, 40)
-                .padding(.bottom, 40)
+                .padding(.bottom, viewModel.showCaptions ? 24 : 40)
 
                 // End call button
                 Button(action: {
@@ -127,7 +139,22 @@ struct ActiveCallView: View {
                                 .fill(Color.red)
                         )
                 }
-                .padding(.bottom, 50)
+                .padding(.bottom, viewModel.showCaptions ? 30 : 50)
+            }
+
+            // Consent prompt when the other person asks to transcribe
+            if viewModel.transcription.state == .peerRequested {
+                VStack {
+                    TranscriptionConsentBanner(
+                        name: viewModel.displayName,
+                        onAllow: { viewModel.transcription.accept() },
+                        onDecline: { viewModel.transcription.decline() }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             // Keypad overlay
@@ -149,6 +176,131 @@ struct ActiveCallView: View {
             }
         }
         .navigationBarHidden(true)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.showCaptions)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.transcription.state)
+    }
+}
+
+// MARK: - Transcription UI
+
+/// "● Transcribing" / "Waiting for approval…" / notices, under the call status.
+struct TranscriptionStatusView: View {
+    @ObservedObject var transcription: CallTranscription
+
+    var body: some View {
+        VStack(spacing: 4) {
+            switch transcription.state {
+            case .active:
+                HStack(spacing: 6) {
+                    Circle().fill(Color.red).frame(width: 8, height: 8)
+                    Text(transcription.usingDemoAudio ? "Transcribing · demo audio" : "Transcribing")
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.red.opacity(0.15)))
+                .foregroundColor(.red)
+                .accessibilityElement(children: .combine)
+            case .waitingForPeer:
+                Label("Waiting for the other person to allow transcription…", systemImage: "hourglass")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+            default:
+                EmptyView()
+            }
+
+            if let notice = transcription.notice {
+                Text(notice)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+        }
+    }
+}
+
+/// Asks this user to allow the other person's transcription request.
+struct TranscriptionConsentBanner: View {
+    let name: String
+    let onAllow: () -> Void
+    let onDecline: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Transcription request", systemImage: "captions.bubble.fill")
+                .font(.headline)
+            Text("\(name) wants to transcribe this call. Each phone transcribes its own side, you both see live captions, and a summary is saved to Recents. You can stop it at any time.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                Button(role: .cancel, action: onDecline) {
+                    Text("Decline").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                Button(action: onAllow) {
+                    Text("Allow").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16).fill(.regularMaterial))
+        .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
+    }
+}
+
+/// Live captions from both sides, newest at the bottom.
+struct CaptionsPanel: View {
+    @ObservedObject var transcription: CallTranscription
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if transcription.lines.isEmpty {
+                        Text(transcription.isActive ? "Listening…" : "No captions yet")
+                            .font(.system(size: 15))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 20)
+                    }
+                    ForEach(transcription.lines) { line in
+                        CaptionRow(line: line)
+                            .id(rowId(line))
+                    }
+                }
+                .padding(12)
+            }
+            .onChange(of: transcription.lines.last?.text) {
+                guard let last = transcription.lines.last else { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(rowId(last), anchor: .bottom) }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.primary.opacity(0.06)))
+        .accessibilityLabel("Live captions")
+    }
+
+    private func rowId(_ line: TranscriptLine) -> String { "\(line.speaker.rawValue)-\(line.id)" }
+}
+
+struct CaptionRow: View {
+    let line: TranscriptLine
+
+    var body: some View {
+        VStack(alignment: line.speaker == .me ? .trailing : .leading, spacing: 2) {
+            Text(line.speaker == .me ? "You" : "Them")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+            Text(line.text)
+                .font(.system(size: 16))
+                .foregroundColor(line.isFinal ? .primary : .secondary)
+                .multilineTextAlignment(line.speaker == .me ? .trailing : .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: line.speaker == .me ? .trailing : .leading)
     }
 }
 
@@ -320,6 +472,31 @@ class ActiveCallViewModel: ObservableObject {
     private var timer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
+    var transcription: CallTranscription { call.transcription }
+
+    /// Captions take the place of the avatar once transcription has started.
+    var showCaptions: Bool { transcription.isActive || !transcription.lines.isEmpty }
+
+    var canTranscribe: Bool {
+        call.state == .connected && transcription.state != .peerRequested
+    }
+
+    var transcribeIcon: String {
+        transcription.isActive ? "captions.bubble.fill" : "captions.bubble"
+    }
+
+    var transcribeLabel: String {
+        switch transcription.state {
+        case .active: return "stop"
+        case .waitingForPeer: return "cancel"
+        default: return "transcribe"
+        }
+    }
+
+    var isTranscribeButtonActive: Bool {
+        transcription.state == .active || transcription.state == .waitingForPeer
+    }
+
     var isMuted: Bool { call.isMuted }
     var isSpeakerOn: Bool { call.isSpeakerOn }
     var isVideoEnabled: Bool { call.isVideoEnabled }
@@ -350,6 +527,9 @@ class ActiveCallViewModel: ObservableObject {
 
         // Re-render whenever the Call changes (state, mute, speaker...).
         call.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        call.transcription.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
@@ -400,9 +580,15 @@ class ActiveCallViewModel: ObservableObject {
         }
     }
 
-    func addCall() {
-        // TODO: Implement add call functionality
-        print("Add call tapped")
+    func toggleTranscription() {
+        switch transcription.state {
+        case .active, .waitingForPeer:
+            transcription.stop()
+        case .off, .declined:
+            transcription.request()
+        case .peerRequested:
+            break
+        }
     }
 
     func showContacts() {

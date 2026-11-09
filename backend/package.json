@@ -11,6 +11,7 @@
     "test": "jest --coverage",
     "test:watch": "jest --watch",
     "smoke": "node test/signaling.smoke.js",
+    "smoke:transcription": "node test/transcription.smoke.js",
     "db:create": "node src/database/create-db.js",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
@@ -37,6 +38,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@parse/node-apn": "^6.5.0",
     "axios": "^1.6.5",
     "bcrypt": "^5.1.1",

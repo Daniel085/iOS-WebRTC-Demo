@@ -17,6 +17,41 @@ const connectedUsers = new Map();
 // Store active calls: Map<callId, {caller, callee, status}>
 const activeCalls = new Map();
 
+// Calls where both people agreed to transcription. Kept for a day after the
+// call so either participant can ask for a summary (POST /api/calls/:id/summary).
+// Only participants and phone numbers are kept, never transcript text.
+// Map<callId, {participants: [userId, userId], phones: {userId: phone}, expiresAt}>
+const transcribedCalls = new Map();
+const TRANSCRIBED_CALL_TTL_MS = 24 * 60 * 60 * 1000;
+
+function rememberTranscribedCall(callId, call) {
+  transcribedCalls.set(callId, {
+    participants: [call.callerId, call.calleeId],
+    phones: { [call.callerId]: call.callerPhone, [call.calleeId]: call.calleePhone },
+    expiresAt: Date.now() + TRANSCRIBED_CALL_TTL_MS
+  });
+}
+
+function getTranscribedCall(callId) {
+  const record = transcribedCalls.get(callId);
+  if (!record) return null;
+  if (record.expiresAt < Date.now()) {
+    transcribedCalls.delete(callId);
+    return null;
+  }
+  return record;
+}
+
+const transcribedCallSweep = setInterval(() => {
+  const now = Date.now();
+  transcribedCalls.forEach((record, callId) => {
+    if (record.expiresAt < now) transcribedCalls.delete(callId);
+  });
+}, 60 * 60 * 1000);
+transcribedCallSweep.unref();
+
+const MAX_SEGMENT_TEXT = 2000;
+
 /**
  * Create the Socket.IO signaling layer.
  *
@@ -346,6 +381,99 @@ function createSignalingServer(existingServer) {
       }
     });
 
+    // ---------------------------------------------------------------
+    // Call transcription (consent + caption relay)
+    //
+    // Either participant may request; only the other may accept. Captions are
+    // relayed only while the call's transcription state is 'active', so the
+    // server enforces consent. Each change is sent to both participants as
+    // `transcription-state {callId, state, byYou}`.
+    // ---------------------------------------------------------------
+
+    const callForParticipant = (callId) => {
+      const call = activeCalls.get(callId);
+      if (!call) return null;
+      if (call.callerId !== socket.userId && call.calleeId !== socket.userId) return null;
+      return call;
+    };
+
+    const emitTranscriptionState = (callId, call, state, actorId) => {
+      [call.callerId, call.calleeId].forEach((userId) => {
+        const connection = connectedUsers.get(userId);
+        if (connection) {
+          io.to(connection.socketId).emit('transcription-state', {
+            callId,
+            state,
+            byYou: userId === actorId
+          });
+        }
+      });
+    };
+
+    socket.on('transcription-request', (data = {}) => {
+      const { callId } = data;
+      const call = callForParticipant(callId);
+      if (!call) return;
+      if (call.status !== 'answered') {
+        socket.emit('transcription-state', { callId, state: 'stopped', byYou: true });
+        return;
+      }
+      if (call.transcription?.state === 'active') {
+        socket.emit('transcription-state', { callId, state: 'active', byYou: false });
+        return;
+      }
+      call.transcription = { state: 'requested', requestedBy: socket.userId };
+      emitTranscriptionState(callId, call, 'requested', socket.userId);
+      logger.info(`Transcription requested on call ${callId} by ${socket.phoneNumber}`);
+    });
+
+    socket.on('transcription-respond', (data = {}) => {
+      const { callId, accepted } = data;
+      const call = callForParticipant(callId);
+      const transcription = call?.transcription;
+      if (!transcription || transcription.state !== 'requested' || transcription.requestedBy === socket.userId) return;
+
+      if (accepted === true) {
+        transcription.state = 'active';
+        rememberTranscribedCall(callId, call);
+        emitTranscriptionState(callId, call, 'active', socket.userId);
+        logger.info(`Transcription active on call ${callId}`);
+      } else {
+        call.transcription = null;
+        emitTranscriptionState(callId, call, 'declined', socket.userId);
+        logger.info(`Transcription declined on call ${callId}`);
+      }
+    });
+
+    socket.on('transcription-stop', (data = {}) => {
+      const { callId } = data;
+      const call = callForParticipant(callId);
+      if (!call || !call.transcription) return;
+      call.transcription = null;
+      emitTranscriptionState(callId, call, 'stopped', socket.userId);
+      logger.info(`Transcription stopped on call ${callId} by ${socket.phoneNumber}`);
+    });
+
+    socket.on('transcript-segment', (data = {}) => {
+      const { callId, segment } = data;
+      const call = callForParticipant(callId);
+      if (!call || call.transcription?.state !== 'active') return;
+      if (!segment || typeof segment.id !== 'string' || typeof segment.text !== 'string') return;
+
+      const recipientConnection = otherPartyConnection(call);
+      if (!recipientConnection) return;
+      io.to(recipientConnection.socketId).emit('transcript-segment', {
+        callId,
+        from: socket.phoneNumber,
+        segment: {
+          id: segment.id.slice(0, 64),
+          text: segment.text.slice(0, MAX_SEGMENT_TEXT),
+          isFinal: segment.isFinal === true,
+          startedAt: Number.isFinite(segment.startedAt) ? segment.startedAt : Date.now()
+        }
+      });
+    });
+
     // Handle disconnection
     socket.on('disconnect', (reason) => {
       logger.info(`Client disconnected: ${socket.phoneNumber} (${reason})`);
@@ -423,3 +551,5 @@ module.exports.createSignalingServer = createSignalingServer;
 module.exports.attachSignalingServer = attachSignalingServer;
 module.exports.connectedUsers = connectedUsers;
 module.exports.activeCalls = activeCalls;
+module.exports.transcribedCalls = transcribedCalls;
+module.exports.getTranscribedCall = getTranscribedCall;
