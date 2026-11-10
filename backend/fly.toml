@@ -8,7 +8,12 @@
 #   fly deploy
 #
 # Then point the iOS app (Settings → Server) at https://webrtc-dialer-backend.fly.dev
-# Later: `fly postgres create` + set SKIP_DATABASE=false and DB_* secrets.
+#
+# Database (optional; without it users and push tokens are lost whenever the
+# machine restarts). See docs/DEPLOYMENT.md "Fly.io" for the steps:
+#   fly postgres create --name webrtc-dialer-db --region sjc
+#   fly postgres attach webrtc-dialer-db        # sets the DATABASE_URL secret
+#   then set SKIP_DATABASE = "false" below and `fly deploy`
 
 app = "webrtc-dialer-backend"
 primary_region = "sjc"
@@ -20,6 +25,9 @@ primary_region = "sjc"
   NODE_ENV = "production"
   PORT = "3000"
   SKIP_DATABASE = "true"
+  # Create missing tables at start (the image has no sequelize-cli for migrations).
+  # Only has an effect once SKIP_DATABASE is "false".
+  DB_SYNC = "true"
   SMS_PROVIDER = "mock"
   ALLOWED_ORIGINS = "*"
   LOG_LEVEL = "info"

@@ -41,8 +41,10 @@ async function startServers() {
 
       // Create any missing tables/indexes. The models use the same snake_case
       // columns as src/database/migrations, so sync() and `npm run db:migrate`
-      // produce the same schema. In production run the migrations instead.
-      if (process.env.NODE_ENV !== 'production') {
+      // produce the same schema. In production run the migrations instead, or
+      // set DB_SYNC=true where they cannot be run (the production image has
+      // no sequelize-cli).
+      if (process.env.NODE_ENV !== 'production' || process.env.DB_SYNC === 'true') {
         await db.sequelize.sync({ alter: false });
         logger.info('✓ Database models synchronized');
       }

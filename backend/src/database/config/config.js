@@ -20,6 +20,9 @@ module.exports = {
     logging: false
   },
   production: {
+    // With DATABASE_URL set, sequelize-cli connects with it and ignores the
+    // individual settings below.
+    ...(process.env.DATABASE_URL ? { use_env_variable: 'DATABASE_URL' } : {}),
     username: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,

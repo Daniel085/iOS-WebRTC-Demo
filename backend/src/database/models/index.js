@@ -106,24 +106,34 @@ if (process.env.SKIP_DATABASE === 'true') {
 
   module.exports = db;
 } else {
-  // Initialize Sequelize
-  const sequelize = new Sequelize(
-    process.env.DB_NAME || 'webrtc_dialer',
-    process.env.DB_USER || 'postgres',
-    process.env.DB_PASSWORD || 'postgres',
-    {
-      host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || 5432,
-      dialect: 'postgres',
-      logging: process.env.NODE_ENV === 'development' ? (msg) => logger.debug(msg) : false,
-      pool: {
-        max: 10,
-        min: 0,
-        acquire: 30000,
-        idle: 10000
-      }
+  // Initialize Sequelize. A DATABASE_URL (what `fly postgres attach`, Render,
+  // Heroku and most hosts provide) wins over the individual DB_* settings.
+  const options = {
+    dialect: 'postgres',
+    logging: process.env.NODE_ENV === 'development' ? (msg) => logger.debug(msg) : false,
+    pool: {
+      max: 10,
+      min: 0,
+      acquire: 30000,
+      idle: 10000
     }
-  );
+  };
+  if (process.env.DB_SSL === 'true') {
+    options.dialectOptions = { ssl: { require: true, rejectUnauthorized: false } };
+  }
+
+  const sequelize = process.env.DATABASE_URL
+    ? new Sequelize(process.env.DATABASE_URL, options)
+    : new Sequelize(
+      process.env.DB_NAME || 'webrtc_dialer',
+      process.env.DB_USER || 'postgres',
+      process.env.DB_PASSWORD || 'postgres',
+      {
+        ...options,
+        host: process.env.DB_HOST || 'localhost',
+        port: process.env.DB_PORT || 5432
+      }
+    );
 
   // Import models
   const User = require('./user')(sequelize, Sequelize.DataTypes);

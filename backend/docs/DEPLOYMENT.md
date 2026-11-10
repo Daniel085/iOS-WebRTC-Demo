@@ -406,6 +406,18 @@ Verify with `curl https://<app>.fly.dev/health`, then set `https://<app>.fly.dev
 
 The backend is deployed as `webrtc-dialer-backend` (https://webrtc-dialer-backend.fly.dev); device builds use it as their default server.
 
+**Adding a database.** Without one, users, refresh tokens and VoIP push tokens live in memory, so every restart or auto-stop of the machine signs all phones out. To persist them:
+
+```bash
+cd backend
+# Smallest single-node Postgres on Fly (billed to the Fly account; unmanaged)
+fly postgres create --name webrtc-dialer-db --region sjc --initial-cluster-size 1 --vm-size shared-cpu-1x --volume-size 1
+# Creates a database and user for the app and stores the connection string as the DATABASE_URL secret
+fly postgres attach webrtc-dialer-db --app webrtc-dialer-backend
+```
+
+Then set `SKIP_DATABASE = "false"` in `fly.toml` and run `fly deploy --ha=false`. `DB_SYNC = "true"` (already in `fly.toml`) creates the tables on first start, because the production image carries no `sequelize-cli`. The backend reads `DATABASE_URL` in preference to the `DB_*` settings; set `DB_SSL=true` only for a database reached over the public internet (Fly's private network does not use TLS). Fly's managed Postgres (`fly mpg`) works the same way through `DATABASE_URL`.
+
 ### Render
 
 The repo includes a Render Blueprint, `backend/render.yaml` (`rootDir: backend`, JWT secrets auto-generated, `SKIP_DATABASE=true`, `SMS_PROVIDER=mock`).
