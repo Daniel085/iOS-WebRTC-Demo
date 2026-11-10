@@ -11,6 +11,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret';
 process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'test-jwt-refresh';
 
 const http = require('http');
+const { randomUUID } = require('crypto');
 const jwt = require('jsonwebtoken');
 const { io: ioClient } = require('socket.io-client');
 
@@ -204,7 +205,7 @@ describe('through the Socket.IO signaling server', () => {
     for (const event of ['call-ringing', 'answer', 'call-answered', 'call-ended', 'call-error']) {
       client.on(event, (payload) => received.push({ event, payload }));
     }
-    const callId = 'sio-1';
+    const callId = randomUUID(); // the signaling server only accepts UUID call IDs
     const inviteSeen = once(fake, 'invite');
     client.emit('call-initiate', { to: '*43', callId, hasVideo: false });
     await sleep(20); // a real client has a round trip here; call-initiate awaits the user lookup
@@ -232,8 +233,9 @@ describe('through the Socket.IO signaling server', () => {
   test('unknown destinations still fail; app users are not sent to SIP', async () => {
     const client = await connectClient(USER);
     const error = once(client, 'call-error');
-    client.emit('call-initiate', { to: 'not-a-number', callId: 'sio-2', hasVideo: false });
-    expect(await error).toEqual({ callId: 'sio-2', error: 'Unknown destination' });
+    const callId = randomUUID();
+    client.emit('call-initiate', { to: 'not-a-number', callId, hasVideo: false });
+    expect(await error).toEqual({ callId, error: 'Unknown destination' });
     client.close();
   });
 
@@ -266,7 +268,7 @@ describe('through the Socket.IO signaling server', () => {
   test('disconnecting the app ends its SIP call and unregisters the user', async () => {
     fake.inviteBehaviour = { status: 200, ringing: false, answerDelayMs: 10, challenge: true };
     const client = await connectClient(USER);
-    const callId = 'sio-4';
+    const callId = randomUUID();
     client.emit('call-initiate', { to: '*43', callId, hasVideo: false });
     await sleep(20);
     client.emit('offer', { callId, sdp: makeOffer({ withCandidates: true }), to: '*43' });

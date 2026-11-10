@@ -544,7 +544,7 @@ class SipGateway extends EventEmitter {
    * out once the app's offer and ICE candidates are complete (or sdpOffer is
    * already complete).
    */
-  placeCall(user, destination, { callId = `sip-${uuidv4()}`, hasVideo = false, sdpOffer = null } = {}) {
+  placeCall(user, destination, { callId = uuidv4(), hasVideo = false, sdpOffer = null } = {}) {
     if (!this.enabled) throw new Error('SIP gateway is disabled');
     if (!this.isSipDestination(destination)) throw new Error(`Not a SIP destination: ${destination}`);
 
@@ -569,7 +569,9 @@ class SipGateway extends EventEmitter {
     }
 
     const session = new SipCallSession(this, {
-      callId: `sip-${uuidv4()}`,
+      // A plain UUID, like app-originated calls: the calls table keys on a
+      // UUID and the iOS app hands the same value to CallKit.
+      callId: uuidv4(),
       direction: 'incoming',
       user,
       from,

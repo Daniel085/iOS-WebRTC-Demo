@@ -169,7 +169,7 @@ function createSignalingServer(existingServer, { sipGateway = getGateway() } = {
       if (!online) {
         try {
           const voipToken = await db.VoipToken.findOne({
-            where: { userId: user.id },
+            where: { userId: user.id, isActive: true },
             order: [['createdAt', 'DESC']]
           });
           if (voipToken) {
@@ -626,7 +626,9 @@ function createSignalingServer(existingServer, { sipGateway = getGateway() } = {
       const { callId } = data;
       const call = callForParticipant(callId);
       if (!call) return;
-      if (call.status !== 'answered') {
+      // A SIP leg has no app on the far end to give consent, so calls through
+      // the gateway cannot be transcribed.
+      if (call.via === 'sip' || call.status !== 'answered') {
         socket.emit('transcription-state', { callId, state: 'stopped', byYou: true });
         return;
       }

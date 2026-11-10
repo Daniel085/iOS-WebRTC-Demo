@@ -60,7 +60,7 @@ function waitFor(socket, event, ms = TIMEOUT_MS) {
   socket.on('call-ringing', (p) => log('← call-ringing', JSON.stringify(p)));
   socket.on('call-ended', (p) => log('← call-ended', JSON.stringify(p)));
 
-  const callId = `sip-it-${Date.now()}`;
+  const callId = require('crypto').randomUUID(); // call IDs must be UUIDs
   const answer = waitFor(socket, 'answer');
   const answered = waitFor(socket, 'call-answered');
 

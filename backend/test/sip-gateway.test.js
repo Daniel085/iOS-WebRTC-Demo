@@ -454,7 +454,7 @@ describe('inbound call', () => {
     const events = recordEvents(session);
 
     expect(session.direction).toBe('incoming');
-    expect(session.callId).toMatch(/^sip-/);
+    expect(session.callId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     expect(session.from).toBe('+15550000009');
     expect(session.user).toBe(USER);
     expect(session.remoteSdp).toBe(offer);
