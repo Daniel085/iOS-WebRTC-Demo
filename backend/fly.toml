@@ -24,7 +24,7 @@ primary_region = "sjc"
 [env]
   NODE_ENV = "production"
   PORT = "3000"
-  SKIP_DATABASE = "true"
+  SKIP_DATABASE = "false"
   # Create missing tables at start (the image has no sequelize-cli for migrations).
   # Only has an effect once SKIP_DATABASE is "false".
   DB_SYNC = "true"
