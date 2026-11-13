@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const logger = require('./utils/logger');
 const { sendVoIPPush } = require('./services/voip-push');
 const db = require('./database/models');
+const { getGateway, SIP_EVENTS } = require('./services/sip-gateway');
 
 // Store active connections: Map<userId, {socketId, phoneNumber}>
 const connectedUsers = new Map();
@@ -87,8 +88,11 @@ const MAX_SEGMENT_TEXT = 2000;
  *   API so everything runs on ONE port. This keeps the backend deployable on
  *   platforms that expose a single port (Fly.io, Render, Railway, Heroku...).
  *   When omitted, a standalone HTTP server is created (used by `npm run dev:signaling`).
+ * @param {object} [options]
+ * @param {SipGateway} [options.sipGateway] - SIP gateway for non-app destinations
+ *   (defaults to the process-wide one built from SIP_* env vars; tests inject their own).
  */
-function createSignalingServer(existingServer) {
+function createSignalingServer(existingServer, { sipGateway = getGateway() } = {}) {
   const server = existingServer || http.createServer();
 
   const io = new Server(server, {
@@ -99,6 +103,89 @@ function createSignalingServer(existingServer) {
     pingTimeout: 60000,
     pingInterval: 25000
   });
+
+  // ---- SIP gateway plumbing -------------------------------------------------
+
+  // Deliver an event to a user if connected, otherwise park it on the call so
+  // the register handler replays it (same mechanism as VoIP-push wake-ups).
+  const deliverToUser = (userId, event, payload, call) => {
+    const connection = connectedUsers.get(userId);
+    if (connection) {
+      io.to(connection.socketId).emit(event, payload);
+      return true;
+    }
+    if (call) {
+      call.pendingSignals = call.pendingSignals || [];
+      call.pendingSignals.push({ toUserId: userId, event, payload });
+    }
+    return false;
+  };
+
+  // Forward everything a SIP call session emits (call-ringing, answer,
+  // call-answered, call-ended, call-error) to the app user it belongs to and
+  // drop the call when the SIP leg closes for any reason.
+  const attachSipSession = (callId, call, session, userId) => {
+    for (const event of SIP_EVENTS) {
+      session.on(event, (payload) => deliverToUser(userId, event, payload, call));
+    }
+    session.on('closed', async ({ status }) => {
+      if (activeCalls.get(callId) === call) activeCalls.delete(callId);
+      logger.info(`SIP call ${callId} closed (${status})`);
+      try {
+        await db.Call.update(
+          { status: status === 'answered' ? 'ended' : status, endedAt: new Date() },
+          { where: { id: callId } }
+        );
+      } catch (error) {
+        logger.debug(`Call ${callId}: database update after SIP close failed: ${error.message}`);
+      }
+    });
+  };
+
+  // Inbound SIP call (Asterisk -> this user's gateway UA) -> app incoming-call + offer.
+  if (sipGateway.enabled) {
+    sipGateway.on('incoming-call', async (session) => {
+      const { callId, user, from, remoteSdp } = session;
+      const call = {
+        callerId: null,
+        callerPhone: from,
+        calleeId: user.id,
+        calleePhone: user.phoneNumber,
+        hasVideo: false,
+        via: 'sip',
+        direction: 'incoming',
+        status: 'ringing',
+        sipSession: session,
+        createdAt: new Date()
+      };
+      activeCalls.set(callId, call);
+      attachSipSession(callId, call, session, user.id);
+
+      const timestamp = new Date().toISOString();
+      const online = deliverToUser(user.id, 'incoming-call', { callId, from, hasVideo: false, via: 'sip', timestamp }, call);
+      deliverToUser(user.id, 'offer', { callId, sdp: remoteSdp, from, hasVideo: false }, call);
+      logger.info(`Inbound SIP call ${callId}: ${from} -> ${user.phoneNumber} (${online ? 'online' : 'offline'})`);
+
+      if (!online) {
+        try {
+          const voipToken = await db.VoipToken.findOne({
+            where: { userId: user.id, isActive: true },
+            order: [['createdAt', 'DESC']]
+          });
+          if (voipToken) {
+            await sendVoIPPush(voipToken.token, { callId, caller: from, hasVideo: false });
+            logger.info(`VoIP push sent for inbound SIP call ${callId}`);
+          } else {
+            logger.warn(`Inbound SIP call ${callId}: ${user.phoneNumber} offline and no VoIP token; rejecting`);
+            session.terminate({ statusCode: 480, reason: 'Temporarily Unavailable' });
+          }
+        } catch (error) {
+          logger.error(`Inbound SIP call ${callId}: VoIP push failed: ${error.message}`);
+          session.terminate({ statusCode: 480, reason: 'Temporarily Unavailable' });
+        }
+      }
+    });
+  }
 
   // Authentication middleware
   io.use(async (socket, next) => {
@@ -124,6 +211,42 @@ function createSignalingServer(existingServer) {
   io.on('connection', (socket) => {
     logger.info(`Client connected: ${socket.phoneNumber} (${socket.id})`);
 
+    /**
+     * Route a call to the SIP gateway (E.164 number, sip: URI or Asterisk
+     * feature code that is not an app user). The INVITE goes out once the
+     * app's offer and ICE candidates have arrived.
+     */
+    const startSipCall = ({ to, callId, hasVideo }) => {
+      if (activeCalls.has(callId)) {
+        socket.emit('call-error', { callId, error: 'Call ID already in use' });
+        return;
+      }
+      let session;
+      try {
+        session = sipGateway.placeCall({ id: socket.userId, phoneNumber: socket.phoneNumber }, to, { callId, hasVideo });
+      } catch (error) {
+        logger.error(`SIP call ${callId}: ${error.message}`);
+        socket.emit('call-error', { callId, error: 'Failed to initiate SIP call' });
+        return;
+      }
+      const call = {
+        callerId: socket.userId,
+        callerPhone: socket.phoneNumber,
+        calleeId: null,
+        calleePhone: to,
+        hasVideo,
+        via: 'sip',
+        direction: 'outgoing',
+        status: 'initiating',
+        sipSession: session,
+        createdAt: new Date()
+      };
+      activeCalls.set(callId, call);
+      attachSipSession(callId, call, session, socket.userId);
+      // Call records for SIP legs (no callee user id) arrive with Phase 5.
+      logger.info(`Call ${callId} routed to SIP gateway: ${socket.phoneNumber} -> ${to}`);
+    };
+
     // Register user connection
     socket.on('register', () => {
       connectedUsers.set(socket.userId, {
@@ -134,6 +257,14 @@ function createSignalingServer(existingServer) {
       logger.info(`User registered: ${socket.phoneNumber}`);
 
       socket.emit('registered', { success: true, phoneNumber: socket.phoneNumber });
+
+      // Keep a SIP registration alive for this user while the app is connected
+      // so Asterisk can route inbound calls to it (docs/SIP_INTEGRATION.md,
+      // "Registration and presence", option 1).
+      if (sipGateway.enabled) {
+        sipGateway.ensureUserAgent({ id: socket.userId, phoneNumber: socket.phoneNumber })
+          .catch((error) => logger.warn(`SIP registration for ${socket.phoneNumber} failed: ${error.message}`));
+      }
 
       // Deliver any offer / ICE candidates that arrived while this user was
       // offline (e.g. the callee was woken by a VoIP push after the caller had
@@ -165,7 +296,13 @@ function createSignalingServer(existingServer) {
         const recipient = await db.User.findOne({ where: { phoneNumber: to } });
 
         if (!recipient) {
-          socket.emit('call-error', { callId, error: 'User not found' });
+          // Not an app user: hand E.164 numbers, sip: URIs and Asterisk
+          // feature codes to the SIP gateway when it is enabled.
+          if (sipGateway.enabled && sipGateway.isSipDestination(to)) {
+            startSipCall({ to, callId, hasVideo });
+          } else {
+            socket.emit('call-error', { callId, error: sipGateway.enabled ? 'Unknown destination' : 'User not found' });
+          }
           return;
         }
 
@@ -241,6 +378,13 @@ function createSignalingServer(existingServer) {
           return;
         }
 
+        if (call.via === 'sip') {
+          // Inbound SIP call: the 200 OK goes out once the app's answer SDP
+          // (plus ICE candidates) has arrived, see the 'answer' handler.
+          call.status = 'answered';
+          return;
+        }
+
         call.status = 'answered';
         activeCalls.set(callId, call);
 
@@ -276,6 +420,14 @@ function createSignalingServer(existingServer) {
           return;
         }
 
+        if (call.via === 'sip') {
+          const busy = reason === 'busy';
+          call.sipSession.terminate({ statusCode: busy ? 486 : 603, reason: busy ? 'Busy Here' : 'Decline' });
+          activeCalls.delete(callId);
+          logger.info(`SIP call rejected: ${callId}`);
+          return;
+        }
+
         // Notify caller
         const callerConnection = connectedUsers.get(call.callerId);
         if (callerConnection) {
@@ -308,6 +460,13 @@ function createSignalingServer(existingServer) {
         const call = activeCalls.get(callId);
 
         if (!call) {
+          return;
+        }
+
+        if (call.via === 'sip') {
+          call.sipSession.terminate(); // CANCEL before answer, BYE after; 'closed' cleans up
+          activeCalls.delete(callId);
+          logger.info(`SIP call ended by app: ${callId}`);
           return;
         }
 
@@ -363,6 +522,12 @@ function createSignalingServer(existingServer) {
         return;
       }
 
+      if (call.via === 'sip') {
+        // Buffered by the gateway; null/empty = end of candidates -> INVITE / 200 OK goes out.
+        call.sipSession.addIceCandidate(candidate);
+        return;
+      }
+
       // Forward ICE candidate to the other peer
       const recipientConnection = otherPartyConnection(call);
 
@@ -387,6 +552,11 @@ function createSignalingServer(existingServer) {
         return;
       }
 
+      if (call.via === 'sip') {
+        call.sipSession.setOffer(sdp);
+        return;
+      }
+
       const recipientConnection = otherPartyConnection(call);
       const payload = { callId, sdp, from: socket.phoneNumber, hasVideo: call.hasVideo };
       if (recipientConnection) {
@@ -403,6 +573,11 @@ function createSignalingServer(existingServer) {
       const call = activeCalls.get(callId);
 
       if (!call) {
+        return;
+      }
+
+      if (call.via === 'sip') {
+        call.sipSession.setAnswer(sdp);
         return;
       }
 
@@ -451,7 +626,9 @@ function createSignalingServer(existingServer) {
       const { callId } = data;
       const call = callForParticipant(callId);
       if (!call) return;
-      if (call.status !== 'answered') {
+      // A SIP leg has no app on the far end to give consent, so calls through
+      // the gateway cannot be transcribed.
+      if (call.via === 'sip' || call.status !== 'answered') {
         socket.emit('transcription-state', { callId, state: 'stopped', byYou: true });
         return;
       }
@@ -515,12 +692,26 @@ function createSignalingServer(existingServer) {
     socket.on('disconnect', (reason) => {
       logger.info(`Client disconnected: ${socket.phoneNumber} (${reason})`);
 
-      // Remove from connected users
-      connectedUsers.delete(socket.userId);
+      // Remove from connected users, unless this user already re-registered
+      // from a newer socket (reconnect race): then the newer socket owns the
+      // registration and the SIP user agent.
+      const current = connectedUsers.get(socket.userId);
+      const superseded = !!current && current.socketId !== socket.id;
+      if (!superseded) {
+        connectedUsers.delete(socket.userId);
+        if (sipGateway.enabled) sipGateway.releaseUser(socket.userId);
+      }
 
       // End any active calls for this user
       activeCalls.forEach((call, callId) => {
         if (call.callerId === socket.userId || call.calleeId === socket.userId) {
+          if (call.via === 'sip') {
+            if (!superseded) {
+              call.sipSession.terminate();
+              activeCalls.delete(callId);
+            }
+            return;
+          }
           // Notify the other party
           const otherUserId = call.callerId === socket.userId ? call.calleeId : call.callerId;
           const otherConnection = connectedUsers.get(otherUserId);

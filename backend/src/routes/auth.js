@@ -11,6 +11,7 @@ const Joi = require('joi');
 
 const db = require('../database/models');
 const { sendVerificationCode, verifyCode } = require('../services/sms-verification');
+const { provisionSipUser } = require('../services/sip-provisioning');
 const logger = require('../utils/logger');
 
 // Validation schemas
@@ -107,6 +108,11 @@ router.post('/verify-code', async (req, res, next) => {
       await user.update({ lastLoginAt: new Date() });
       logger.info(`User logged in: ${phoneNumber}`);
     }
+
+    // Make sure Asterisk has a PJSIP endpoint for this user (no-op unless
+    // SIP_ENABLED=true). Bounded and never throws, so sign-in is not blocked
+    // by telephony problems; see services/sip-provisioning.js.
+    await provisionSipUser(user);
 
     // Generate JWT token
     const token = jwt.sign(

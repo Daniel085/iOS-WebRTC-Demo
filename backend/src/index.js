@@ -13,6 +13,7 @@ const logger = require('./utils/logger');
 
 const { createApiServer } = require('./api-server');
 const { attachSignalingServer } = require('./signaling-server');
+const { getGateway } = require('./services/sip-gateway');
 
 // Import database
 const db = require('./database/models');
@@ -69,6 +70,12 @@ async function startServers() {
 
     logger.info(`✓ API Server running on port ${PORT} (http://0.0.0.0:${PORT})`);
     logger.info(`✓ Signaling Server attached on the same port (Socket.IO path /socket.io)`);
+    const sipGateway = getGateway();
+    if (sipGateway.enabled) {
+      logger.info(`✓ SIP gateway enabled: ${sipGateway.config.wssUrl} (domain ${sipGateway.config.domain})`);
+    } else {
+      logger.info('SIP gateway disabled (SIP_ENABLED != true): calls to non-app numbers get call-error');
+    }
     logger.info('✓ All servers started successfully');
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
 
@@ -76,6 +83,7 @@ async function startServers() {
     const gracefulShutdown = async (signal) => {
       logger.info(`${signal} received, shutting down gracefully...`);
 
+      sipGateway.shutdown();
       io.close();
       server.close(() => {
         logger.info('✓ HTTP server closed');
