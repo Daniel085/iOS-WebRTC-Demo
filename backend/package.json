@@ -8,7 +8,7 @@
     "dev": "nodemon src/index.js",
     "dev:api": "nodemon src/api-server.js",
     "dev:signaling": "nodemon src/signaling-server.js",
-    "test": "jest --coverage",
+    "test": "jest --coverage --forceExit",
     "test:watch": "jest --watch",
     "smoke": "node test/signaling.smoke.js",
     "smoke:transcription": "node test/transcription.smoke.js",
@@ -25,7 +25,9 @@
     "docker:build": "docker build -t webrtc-dialer-backend .",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
-    "docker:logs": "docker-compose logs -f"
+    "docker:logs": "docker-compose logs -f",
+    "sip:integration": "node test/sip-echo.integration.js",
+    "test:unit": "jest --forceExit"
   },
   "keywords": [
     "webrtc",
@@ -50,6 +52,7 @@
     "helmet": "^7.1.0",
     "joi": "^17.11.0",
     "jsonwebtoken": "^9.0.2",
+    "jssip": "^3.13.9",
     "morgan": "^1.10.0",
     "pg": "^8.11.3",
     "pg-hstore": "^2.3.4",
@@ -57,7 +60,8 @@
     "socket.io": "^4.6.1",
     "twilio": "^4.19.3",
     "uuid": "^9.0.1",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "ws": "^8.22.1"
   },
   "devDependencies": {
     "eslint": "^8.56.0",
@@ -70,5 +74,16 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 15000,
+    "testMatch": [
+      "**/test/**/*.test.js"
+    ],
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/test/"
+    ]
   }
 }

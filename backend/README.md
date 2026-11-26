@@ -777,6 +777,16 @@ For issues:
 - Review [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - Check troubleshooting section above
 
+## SIP / PSTN gateway (Asterisk)
+
+Calls to destinations that are not app users (E.164 numbers, `sip:` URIs,
+Asterisk feature codes such as the `*43` echo test) can be routed through an
+Asterisk container instead of failing. Set `SIP_ENABLED=true`,
+`ASTERISK_WSS_URL`, `ASTERISK_DOMAIN` and `SIP_GATEWAY_SECRET` (see
+`.env.example`), start Asterisk with `docker compose up asterisk`, and verify
+with `npm run sip:integration`. Design: `../docs/SIP_INTEGRATION.md`; runbook:
+`asterisk/README.md`.
+
 ## License
 
 MIT
